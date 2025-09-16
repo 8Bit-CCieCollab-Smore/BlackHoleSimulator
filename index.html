@@ -7,9 +7,10 @@
     :root { color-scheme: dark; }
     body { margin: 0; background:#000; overflow: hidden; font-family: system-ui, Arial, sans-serif; }
     #overlay {
-      position: absolute; top: 12px; left: 12px; width: 280px;
+      position: absolute; top: 12px; left: 12px; width: 300px;
       background: rgba(255,255,255,0.92); color:#111; padding:12px 14px;
       border-radius: 12px; box-shadow: 0 6px 24px rgba(0,0,0,0.35); font-size:14px; z-index:10;
+      max-height:95vh; overflow-y:auto;
     }
     #overlay h3 { margin:0 0 8px 0; font-size:16px; }
     #overlay .row { display:flex; gap:8px; margin:6px 0; }
@@ -41,9 +42,10 @@
     <div class="row">
       <button id="addPlanetBtn">➕ Planet</button>
       <button id="addBHBtn">🕳️ Black Hole</button>
+      <button id="addSunBtn">☀️ Sun</button>
     </div>
 
-    <!-- Context-sensitive controls: shown only when a BH is selected -->
+    <!-- Shown only when a BH is selected -->
     <div id="bhControls" class="disabled">
       <label>Mass <input id="massSlider" type="range" min="2000" max="60000" step="500" value="9000"></label>
       <label>Radius <input id="radiusSlider" type="range" min="20" max="160" step="2" value="60"></label>
@@ -53,10 +55,15 @@
       <input id="supernovaChk" type="checkbox" checked>
     </label>
 
+    <label>Realism (Inspiral drag)
+      <input id="realismSlider" type="range" min="0" max="100" step="1" value="20">
+    </label>
+
     <div class="muted" style="margin-top:8px;">
       • Drag to pan • Wheel to zoom • Double-click to center<br>
       • Click a black hole to edit it<br>
-      • Click a planet for POV; click empty space to exit
+      • Click a planet for POV; click empty space to exit<br>
+      • Suns spaghettify when near black holes
     </div>
   </div>
 
@@ -174,8 +181,9 @@
   const planets = []; // {x,y,vx,vy,r,color,trail[],alive}
   const frags   = []; // {x,y,vx,vy,r,color,trail[],fade}
   const blackHoles = []; // {x,y,vx,vy,mass,radius,diskColors[],diskRot,waveT,mergeFlash, timeClose}
+  const suns = []; // NEW array for suns
 
-  const settings = { defaultBHMass: 9000, defaultBHRadius: 60, supernova: true };
+  const settings = { defaultBHMass: 9000, defaultBHRadius: 60, supernova: true, realism: 0.00002 };
 
   // Initial BH at origin
   addBlackHoleAt(0,0);
@@ -218,12 +226,21 @@
                    center.y + (Math.random()-0.5)*200/cam.s,
                    /*tryOrbit=*/true);
   });
+  document.getElementById('addSunBtn').addEventListener('click', ()=>{
+    const center = screenToWorld(window.innerWidth/2, window.innerHeight/2);
+    addSun(center.x + (Math.random()-0.5)*250/cam.s,
+           center.y + (Math.random()-0.5)*250/cam.s);
+  });
 
   massSlider.addEventListener('input', e=>{
     if (selectedBH){ selectedBH.mass = +e.target.value; }
   });
   radiusSlider.addEventListener('input', e=>{
     if (selectedBH){ selectedBH.radius = +e.target.value; }
+  });
+  document.getElementById('realismSlider').addEventListener('input', e=>{
+    const val = +e.target.value;
+    settings.realism = val/100000; // scale slider 0–100 → 0–0.001
   });
 
   // ===== Spawners =====
@@ -286,6 +303,17 @@
     blackHoles.push(b);
   }
 
+  function addSun(x,y){
+    const radius = (Math.random()*0.3+0.6)*settings.defaultBHRadius; // 60%–90% of BH size
+    const mass = Math.random()*settings.defaultBHMass*0.3;           // up to 30% of BH mass
+    suns.push({
+      x,y,
+      vx:(Math.random()-0.5)*1,vy:(Math.random()-0.5)*1,
+      radius,mass,color:'#ffaa00',
+      particles:[] // {x,y,vx,vy,color,fade}
+    });
+  }
+
   function totalBHMassNear(x,y){
     let m = 0;
     for (const bh of blackHoles){
@@ -304,7 +332,77 @@
       cam.y = lerp(cam.y, cam.follow.y, 0.15);
     }
 
-    // Planets
+    // --- Suns (orbit + spaghettification) ---
+    for (let i=suns.length-1;i>=0;i--){
+      const s=suns[i];
+      let ax=0, ay=0;
+      let nearestBH = null; let nearestD = Infinity;
+
+      // Gravity from BHs
+      for (const b of blackHoles){
+        const dx = b.x - s.x, dy = b.y - s.y;
+        const r2 = dx*dx + dy*dy + 0.001;
+        const d = Math.sqrt(r2);
+        if (d < nearestD){ nearestD = d; nearestBH = b; }
+        const F = b.mass / r2;
+        ax += F * dx / d;
+        ay += F * dy / d;
+      }
+
+      // Move sun
+      s.vx += ax*dt; s.vy += ay*dt;
+      s.x  += s.vx*dt; s.y  += s.vy*dt;
+
+      // Spaghettify near nearest BH (gradual particle shedding from near-side)
+      if (nearestBH && nearestD < nearestBH.radius*3){
+        // Bias emission toward BH side
+        if (Math.random() < 0.3){
+          const dx = nearestBH.x - s.x, dy = nearestBH.y - s.y;
+          const d = Math.hypot(dx,dy) || 1;
+          const ux = dx/d, uy = dy/d;
+          const speedOut = 2 + Math.random()*1.5;
+          s.particles.push({
+            x: s.x + ux*s.radius, y: s.y + uy*s.radius,
+            vx: ux*speedOut, vy: uy*speedOut,
+            color: s.color, fade: 1
+          });
+        }
+      }
+
+      // Consumed by BH
+      if (nearestBH && nearestD <= nearestBH.radius){
+        nearestBH.diskColors.unshift(s.color);
+        if (nearestBH.diskColors.length > 8) nearestBH.diskColors = nearestBH.diskColors.slice(0,8);
+        suns.splice(i,1);
+        continue;
+      }
+
+      // Update shed particles
+      for (let j=s.particles.length-1;j>=0;j--){
+        const p = s.particles[j];
+        // particles get attracted too (towards nearest BH)
+        if (nearestBH){
+          const dx = nearestBH.x - p.x, dy = nearestBH.y - p.y;
+          const r2 = dx*dx + dy*dy + 0.001;
+          const d = Math.sqrt(r2);
+          const F = nearestBH.mass / r2;
+          const axp = F * dx / d;
+          const ayp = F * dy / d;
+          p.vx += axp*dt; p.vy += ayp*dt;
+        }
+        p.x += p.vx*dt; p.y += p.vy*dt;
+        p.fade -= 0.006*dt;
+        if (nearestBH && Math.hypot(nearestBH.x-p.x, nearestBH.y-p.y) <= nearestBH.radius){
+          nearestBH.diskColors.unshift(s.color);
+          if (nearestBH.diskColors.length > 8) nearestBH.diskColors = nearestBH.diskColors.slice(0,8);
+          s.particles.splice(j,1);
+          continue;
+        }
+        if (p.fade <= 0) s.particles.splice(j,1);
+      }
+    }
+
+    // --- Planets ---
     for (let i=planets.length-1; i>=0; i--){
       const p = planets[i];
       let ax=0, ay=0;
@@ -338,7 +436,6 @@
             fade:1
           });
         }
-        // exit POV if planet was selected
         if (planetPOV === p){ clearSelection(); }
         continue;
       }
@@ -360,7 +457,7 @@
       if (p.trail.length > 32) p.trail.shift();
     }
 
-    // Fragments
+    // --- Fragments ---
     for (let i=frags.length-1; i>=0; i--){
       const f = frags[i];
       let ax=0, ay=0;
@@ -389,7 +486,7 @@
       if (f.fade > 0.2) f.fade -= 0.001*dt;
     }
 
-    // BH–BH gravity with inspiral (tiny radiation reaction drag)
+    // --- BH–BH gravity with inspiral (drag scales with "Realism") ---
     for (let i=0;i<blackHoles.length;i++){
       const A = blackHoles[i];
       for (let j=i+1;j<blackHoles.length;j++){
@@ -408,8 +505,8 @@
         A.vx += ax*dt; A.vy += ay*dt;
         B.vx += bx*dt; B.vy += by*dt;
 
-        // Inspiral: subtract tiny energy ~ 1/r^5 along velocity (mimics GW emission)
-        const drag = 0.00002 / (d2*d2*d); // ~ 1/r^5
+        // Inspiral drag ~ realism / r^5
+        const drag = settings.realism / (d2*d2*d + 1e-6);
         const Av = Math.hypot(A.vx, A.vy) + 1e-6;
         const Bv = Math.hypot(B.vx, B.vy) + 1e-6;
         A.vx -= A.vx/Av * drag * dt * A.mass;
@@ -417,13 +514,13 @@
         B.vx -= B.vx/Bv * drag * dt * B.mass;
         B.vy -= B.vy/Bv * drag * dt * B.mass;
 
-        // Count time close (so they orbit a bit before merging)
+        // Orbit a bit before merging
         const closeThresh = (A.radius + B.radius)*3;
         if (d < closeThresh){
           A.timeClose += dt; B.timeClose += dt;
         }
 
-        // Merge when truly touching AND they've spent some time close
+        // Merge when touching and close for a while
         if (d <= (A.radius + B.radius)*0.9 && (A.timeClose > 0.6 || B.timeClose > 0.6)){
           const big = (A.mass >= B.mass) ? A : B;
           const small = (A.mass < B.mass) ? A : B;
@@ -438,13 +535,13 @@
 
           const idx = blackHoles.indexOf(small);
           blackHoles.splice(idx,1);
-          // Fix selection if removed
           if (selectedBH === small) clearSelection();
           i = 0; break;
         }
       }
     }
 
+    // Integrate BH positions
     for (const b of blackHoles){
       b.x += b.vx*dt; b.y += b.vy*dt;
       b.vx *= 0.999; b.vy *= 0.999; // mild damping for stability
@@ -466,6 +563,26 @@
     }
     ctx.globalAlpha = 1;
 
+    // Sun bodies + their shed particles
+    for (const s of suns){
+      const c = worldToScreen(s.x, s.y);
+      // glow gradient body
+      const body = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, s.radius*cam.s*2);
+      body.addColorStop(0, 'rgba(255,220,120,0.9)');
+      body.addColorStop(1, 'rgba(255,160,0,0)');
+      ctx.fillStyle = body;
+      ctx.beginPath(); ctx.arc(c.x, c.y, Math.max(1.5, s.radius*cam.s), 0, Math.PI*2); ctx.fill();
+
+      // particles
+      for (const p of s.particles){
+        const ps = worldToScreen(p.x,p.y);
+        ctx.globalAlpha = p.fade;
+        ctx.fillStyle = p.color;
+        ctx.beginPath(); ctx.arc(ps.x, ps.y, 2, 0, Math.PI*2); ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    }
+
     // Trails
     const strokeTrail = (trail, color, alpha=0.5)=>{
       if (trail.length<2) return;
@@ -481,7 +598,7 @@
     for (const p of planets) strokeTrail(p.trail, p.color, 0.5);
     for (const f of frags)   strokeTrail(f.trail, f.color, 0.35);
 
-    // Disks
+    // Accretion Disks
     for (const b of blackHoles) drawAccretionDisk(b);
 
     // BH cores + supernova + selection highlight
