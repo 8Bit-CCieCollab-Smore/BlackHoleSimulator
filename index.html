@@ -45,7 +45,6 @@
       <button id="addSunBtn">☀️ Sun</button>
     </div>
 
-    <!-- Shown only when a BH is selected -->
     <div id="bhControls" class="disabled">
       <label>Mass <input id="massSlider" type="range" min="2000" max="60000" step="500" value="9000"></label>
       <label>Radius <input id="radiusSlider" type="range" min="20" max="160" step="2" value="60"></label>
@@ -63,7 +62,7 @@
       • Drag to pan • Wheel to zoom • Double-click to center<br>
       • Click a black hole to edit it<br>
       • Click a planet or sun for POV; click empty space to exit<br>
-      • Suns spaghettify with multi-point ripping and bright glow
+      • Stars bend near BHs (lensing) • Suns spaghettify faster
     </div>
   </div>
 
@@ -72,12 +71,12 @@
   <canvas id="c"></canvas>
 
   <script>
-  // ===== Helpers =====
+  // ===== Constants & Helpers =====
+  const TAU = Math.PI*2;
   const randIndex = n => (Math.random()*n) | 0;
   const pick = arr => arr[randIndex(arr.length)];
   const clamp = (v,min,max)=> Math.max(min, Math.min(max, v));
   const lerp = (a,b,t)=> a + (b-a)*t;
-  const TAU = Math.PI*2;
 
   // ===== Canvas & Camera =====
   const cv = document.getElementById('c');
@@ -131,7 +130,6 @@
     const zoomFactor = Math.exp(-e.deltaY * 0.0015);
     const newS = clamp(cam.s * zoomFactor, cam.minS, cam.maxS);
     const scale = newS / cam.s;
-    // zoom to cursor
     cam.x = mouseWorld.x - (mouseWorld.x - cam.x) * scale;
     cam.y = mouseWorld.y - (mouseWorld.y - cam.y) * scale;
     cam.s = newS;
@@ -142,7 +140,7 @@
     cam.x = w.x; cam.y = w.y;
   });
 
-  // Click to select BH / Planet / Sun / empty
+  // Click to select BH / Sun / Planet / empty
   cv.addEventListener('click', e=>{
     const w = screenToWorld(e.clientX, e.clientY);
     // hit BH first
@@ -171,13 +169,13 @@
 
   // ===== World State =====
   const stars = [];
-  const STAR_COUNT = 2000;
+  const STAR_COUNT = 2200;
   const STAR_COLS = ['#fff','#ffd27f','#87cefa','#ffaaa5'];
 
   for (let i=0;i<STAR_COUNT;i++){
     stars.push({
-      x: (Math.random()-0.5)*8000,
-      y: (Math.random()-0.5)*8000,
+      x: (Math.random()-0.5)*9000,
+      y: (Math.random()-0.5)*9000,
       c: pick(STAR_COLS),
       s: Math.random()*1.5+0.5
     });
@@ -190,7 +188,7 @@
 
   const settings = {
     defaultBHMass: 9000, defaultBHRadius: 60, supernova: true,
-    realism: 0.02 // tuned stronger than before; slider scales this value
+    realism: 0.035 // slider will map 0..100 → 0..0.10
   };
 
   // Initial BH at origin
@@ -229,7 +227,7 @@
     bhControls.classList.add('disabled');
   }
 
-  // UI bindings
+  // ===== UI bindings =====
   document.getElementById('supernovaChk').addEventListener('change', e=>{
     settings.supernova = e.target.checked;
   });
@@ -254,8 +252,7 @@
   });
   document.getElementById('realismSlider').addEventListener('input', e=>{
     const val = +e.target.value; // 0..100
-    // much more visible: realism in [0..0.1]
-    settings.realism = val/1000; // 0.00 → 0.10
+    settings.realism = val/1000; // 0.00 → 0.10 (more visible)
   });
 
   // ===== Spawners =====
@@ -323,7 +320,7 @@
       x,y,
       vx:(Math.random()-0.5)*1,vy:(Math.random()-0.5)*1,
       radius,mass,color:'#ffb200',
-      particles:[] // {x,y,vx,vy,color,fade}
+      particles:[] // {x,y,vx,vy,color,fade,glow}
     });
   }
 
@@ -395,19 +392,17 @@
         continue;
       }
 
-      // Update shed particles
+      // Update shed particles (faster infall; eaten at 2x radius)
       for (let j=s.particles.length-1;j>=0;j--){
         const p = s.particles[j];
-        // particles get attracted too (towards nearest BH)
         if (nearestBH){
           const dx = nearestBH.x - p.x, dy = nearestBH.y - p.y;
           const r2 = dx*dx + dy*dy + 0.001;
           const d = Math.sqrt(r2);
-          const F = nearestBH.mass / r2;
+          const F = (nearestBH.mass / r2) * 2.0; // ×2 stronger pull than default
           const axp = F * dx / d;
           const ayp = F * dy / d;
           p.vx += axp*dt; p.vy += ayp*dt;
-          // EAT at 2× radius distance
           if (d <= nearestBH.radius*2){
             nearestBH.diskColors.unshift(s.color);
             if (nearestBH.diskColors.length > 8) nearestBH.diskColors = nearestBH.diskColors.slice(0,8);
@@ -442,6 +437,7 @@
       p.vx += ax*dt; p.vy += ay*dt;
       p.x  += p.vx*dt; p.y  += p.vy*dt;
 
+      // Tidal breakup region
       if (nearestBH && nearestD < nearestBH.radius*2 && p.alive){
         planets.splice(i,1);
         const pieces = 10;
@@ -460,6 +456,7 @@
         continue;
       }
 
+      // Consumption
       let consumed = false;
       for (const b of blackHoles){
         if (Math.hypot(b.x-p.x, b.y-p.y) <= b.radius){
@@ -525,7 +522,7 @@
         A.vx += ax*dt; A.vy += ay*dt;
         B.vx += bx*dt; B.vy += by*dt;
 
-        // Inspiral drag (more visible): ~ realism / r^5
+        // Inspiral drag (visible): ~ realism / r^5
         const drag = settings.realism / (d2*d2*d + 1e-6);
         const Av = Math.hypot(A.vx, A.vy) + 1e-6;
         const Bv = Math.hypot(B.vx, B.vy) + 1e-6;
@@ -573,17 +570,10 @@
   function draw(){
     ctx.clearRect(0,0,window.innerWidth,window.innerHeight);
 
-    // Stars
-    for (const s of stars){
-      const p = worldToScreen(s.x, s.y);
-      if (p.x<-10||p.x>window.innerWidth+10||p.y<-10||p.y>window.innerHeight+10) continue;
-      ctx.globalAlpha = 0.6;
-      ctx.fillStyle = s.c;
-      ctx.fillRect(p.x, p.y, s.s*cam.s, s.s*cam.s);
-    }
-    ctx.globalAlpha = 1;
+    // Stars with simple gravitational lensing (screen-space offset)
+    drawStarsWithLensing();
 
-    // SUNS (bright glow) + particles
+    // Suns (bright glow) + particles
     for (const s of suns){
       const c = worldToScreen(s.x, s.y);
       // body glow
@@ -627,7 +617,7 @@
     for (const p of planets) strokeTrail(p.trail, p.color, 0.5);
     for (const f of frags)   strokeTrail(f.trail, f.color, 0.35);
 
-    // Disks
+    // Accretion Disks
     for (const b of blackHoles) drawAccretionDisk(b);
 
     // BH cores + supernova + selection highlight
@@ -654,7 +644,7 @@
       if (b.mergeFlashT>0){
         const t = 1 - (b.mergeFlashT/5); // 0 → 1 over 5s
         const ease = t*t*(3-2*t); // smoothstep
-        const R = (b.radius*8 + 200*ease) * cam.s; // expanding radius
+        const R = (b.radius*8 + 220*ease) * cam.s; // expanding radius
         const alpha = Math.max(0, 0.9 - t*0.9);     // fade out
         const g = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, R);
         g.addColorStop(0, `rgba(255,255,255,${0.7*alpha})`);
@@ -691,6 +681,32 @@
       ctx.fill();
       ctx.globalAlpha = 1;
     }
+  }
+
+  function drawStarsWithLensing(){
+    for (const s of stars){
+      let sx = (s.x - cam.x)*cam.s + window.innerWidth/2;
+      let sy = (s.y - cam.y)*cam.s + window.innerHeight/2;
+
+      // Apply simple lensing from each BH (screen-space radial offset)
+      for (const b of blackHoles){
+        const dx = s.x - b.x;
+        const dy = s.y - b.y;
+        const dist = Math.hypot(dx,dy);
+        const lensInfluence = b.radius*3;
+        if (dist < lensInfluence*5){
+          const factor = (b.radius*1.5)/(dist+1); // stronger near the core
+          sx += (dx/dist) * factor * cam.s * 15;
+          sy += (dy/dist) * factor * cam.s * 15;
+        }
+      }
+
+      if (sx<-10||sx>window.innerWidth+10||sy<-10||sy>window.innerHeight+10) continue;
+      ctx.globalAlpha = 0.7;
+      ctx.fillStyle = s.c;
+      ctx.fillRect(sx, sy, s.s*cam.s, s.s*cam.s);
+    }
+    ctx.globalAlpha = 1;
   }
 
   function drawAccretionDisk(b){
