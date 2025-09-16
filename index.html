@@ -25,6 +25,21 @@
       margin: 0 0 6px 0;
       font-size: 16px;
     }
+    #controls {
+      margin-top: 8px;
+    }
+    #controls button {
+      background: #111;
+      color: #fff;
+      border: none;
+      padding: 6px 12px;
+      margin-top: 5px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    #controls button:hover {
+      background: #444;
+    }
     canvas { display: block; }
   </style>
 </head>
@@ -32,8 +47,11 @@
   <div id="overlay">
     <h3>🌌 Black Hole Simulator</h3>
     <p>• Stars warp near black hole<br>
-       • Planets orbit via gravity<br>
-       • Pure JS + Canvas</p>
+       • Add planets with button<br>
+       • Planets fall in & fade out</p>
+    <div id="controls">
+      <button onclick="addPlanet()">➕ Add Planet</button>
+    </div>
   </div>
 
   <canvas id="space"></canvas>
@@ -41,52 +59,59 @@
   <script>
     const canvas = document.getElementById("space");
     const ctx = canvas.getContext("2d");
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
 
     function resizeCanvas() {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
     }
-    window.addEventListener("resize", resizeCanvas);
-    resizeCanvas();
 
     // --- Black hole ---
-    const bh = { x: canvas.width/2, y: canvas.height/2, mass: 8000, radius: 40 };
+    const bh = { x: canvas.width/2, y: canvas.height/2, mass: 8000, radius: 50 };
 
-    // --- Stars ---
+    // --- Stars (parallax layers) ---
     const stars = [];
-    for (let i = 0; i < 1200; i++) {
+    for (let i = 0; i < 1500; i++) {
       stars.push({
         x: Math.random() * canvas.width,
         y: Math.random() * canvas.height,
         color: ["#fff","#ffd27f","#87cefa","#ffaaa5"][Math.floor(Math.random()*4)],
-        size: Math.random()*2
+        size: Math.random()*2,
+        depth: Math.random()*3+1 // used for parallax
       });
     }
 
     // --- Planets ---
     const planets = [];
-    for (let i = 0; i < 3; i++) {
-      let dist = 120 + i*100;
+
+    function addPlanet() {
+      let dist = Math.random() * 250 + 80;
+      let angle = Math.random() * Math.PI * 2;
+      let x = bh.x + dist * Math.cos(angle);
+      let y = bh.y + dist * Math.sin(angle);
+      let speed = Math.sqrt(bh.mass/dist);
+      let vx = -Math.sin(angle) * speed;
+      let vy = Math.cos(angle) * speed;
       planets.push({
-        x: bh.x + dist,
-        y: bh.y,
-        vx: 0,
-        vy: Math.sqrt(bh.mass/dist), // orbital speed
-        r: 12 + i*4,
-        color: ["#4cc9f0","#ff006e","#8338ec"][i]
+        x, y, vx, vy,
+        r: Math.random()*6+6,
+        color: ["#4cc9f0","#ff006e","#8338ec","#06d6a0"][Math.floor(Math.random()*4)],
+        alive: true,
+        fade: 1.0 // 1 = full visible, 0 = gone
       });
     }
 
     function drawBlackHole() {
-      // Core
+      // core (super black)
       ctx.beginPath();
       ctx.arc(bh.x, bh.y, bh.radius, 0, Math.PI*2);
-      ctx.fillStyle = "black";
+      ctx.fillStyle = "#000000";
       ctx.fill();
 
-      // Glow (accretion disk effect)
+      // accretion glow
       let gradient = ctx.createRadialGradient(bh.x,bh.y,bh.radius, bh.x,bh.y,bh.radius*3);
-      gradient.addColorStop(0,"rgba(255,150,0,0.7)");
+      gradient.addColorStop(0,"rgba(255,150,0,0.8)");
       gradient.addColorStop(1,"rgba(0,0,0,0)");
       ctx.beginPath();
       ctx.arc(bh.x,bh.y,bh.radius*3,0,Math.PI*2);
@@ -100,48 +125,68 @@
         let dy = star.y - bh.y;
         let dist = Math.sqrt(dx*dx + dy*dy);
 
-        // warp effect near black hole
+        // subtle warp effect near black hole
         let offsetX = 0, offsetY = 0;
-        if (dist < 200) {
-          let factor = 200 / dist;
-          offsetX = dx * 0.05 * factor;
-          offsetY = dy * 0.05 * factor;
+        if (dist < 250) {
+          let factor = 250 / dist;
+          offsetX = dx * 0.02 * factor;
+          offsetY = dy * 0.02 * factor;
         }
 
         ctx.fillStyle = star.color;
+        ctx.globalAlpha = 0.5 + (3-star.depth)/3;
         ctx.fillRect(star.x + offsetX, star.y + offsetY, star.size, star.size);
+        ctx.globalAlpha = 1.0;
       });
     }
 
     function updateAndDrawPlanets(dt) {
       planets.forEach(p => {
-        // gravity
-        let dx = bh.x - p.x;
-        let dy = bh.y - p.y;
-        let r2 = dx*dx + dy*dy;
-        let dist = Math.sqrt(r2);
-        let force = bh.mass / r2;
-        let ax = force * dx / dist;
-        let ay = force * dy / dist;
+        if (p.alive) {
+          // gravity
+          let dx = bh.x - p.x;
+          let dy = bh.y - p.y;
+          let r2 = dx*dx + dy*dy;
+          let dist = Math.sqrt(r2);
 
-        p.vx += ax * dt;
-        p.vy += ay * dt;
+          if (dist <= bh.radius) {
+            // Planet is "consumed"
+            p.alive = false;
+            p.vx = 0; p.vy = 0;
+          } else {
+            let force = bh.mass / r2;
+            let ax = force * dx / dist;
+            let ay = force * dy / dist;
 
-        p.x += p.vx * dt;
-        p.y += p.vy * dt;
+            p.vx += ax * dt;
+            p.vy += ay * dt;
 
-        // Draw
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
-        ctx.fillStyle = p.color;
-        ctx.fill();
+            p.x += p.vx * dt;
+            p.y += p.vy * dt;
+          }
+        } else {
+          // Dead planet fades
+          p.fade -= 0.01;
+          if (p.fade < 0) p.fade = 0;
+        }
+
+        // Draw planet (skip if fully gone)
+        if (p.fade > 0) {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+          let col = p.alive ? p.color : "#000000";
+          ctx.fillStyle = col;
+          ctx.globalAlpha = p.fade;
+          ctx.fill();
+          ctx.globalAlpha = 1.0;
+        }
       });
     }
 
     // --- Animation loop ---
     let lastTime = performance.now();
     function animate(now) {
-      let dt = (now - lastTime)/50; // slow down physics
+      let dt = (now - lastTime)/50;
       lastTime = now;
 
       ctx.clearRect(0,0,canvas.width,canvas.height);
