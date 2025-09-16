@@ -87,7 +87,7 @@
     // --- Planets & Fragments ---
     const planets = [];
     const fragments = [];
-    const diskColors = []; // stores colors of consumed planets
+    let diskColors = [];
     let diskRotation = 0;
 
     function addPlanet() {
@@ -104,16 +104,15 @@
         x, y, vx, vy,
         r: Math.random()*6+8,
         color: ["#4cc9f0","#ff006e","#8338ec","#06d6a0"][Math.floor(Math.random()*4)],
-        alive: true
+        alive: true,
+        trail: []
       });
     }
 
     function drawBlackHole() {
-      // accretion disk (if any planets have been eaten)
       if (diskColors.length > 0) {
         let slices = diskColors.length;
         let anglePer = (Math.PI*2) / slices;
-
         for (let i = 0; i < slices; i++) {
           ctx.beginPath();
           ctx.arc(bh.x,bh.y,bh.radius*3, diskRotation + i*anglePer, diskRotation + (i+1)*anglePer);
@@ -124,10 +123,9 @@
           ctx.fill();
           ctx.globalAlpha = 1.0;
         }
-        diskRotation += 0.01; // spin clockwise
+        diskRotation += 0.01;
       }
 
-      // solid black core
       ctx.beginPath();
       ctx.arc(bh.x, bh.y, bh.radius, 0, Math.PI*2);
       ctx.fillStyle = "black";
@@ -151,9 +149,9 @@
         let r2 = dx*dx + dy*dy;
         let dist = Math.sqrt(r2);
 
-        // Spaghettify if within danger zone
+        // Spaghettify
         if (dist < bh.radius*2) {
-          planets.splice(i,1); // remove planet
+          planets.splice(i,1);
           for (let j=0;j<8;j++) {
             fragments.push({
               x: p.x, y: p.y,
@@ -161,15 +159,16 @@
               vy: p.vy * (0.5+Math.random()*0.5),
               r: p.r/3,
               color: p.color,
-              fade: 1.0
+              fade: 1.0,
+              trail: []
             });
           }
           continue;
         }
 
         if (dist <= bh.radius) {
-          // Consumed
           diskColors.push(p.color);
+          if (diskColors.length > 8) diskColors = diskColors.slice(-8); // limit slices
           planets.splice(i,1);
           continue;
         }
@@ -181,6 +180,22 @@
         p.vy += ay * dt;
         p.x += p.vx * dt;
         p.y += p.vy * dt;
+
+        // Update trail
+        p.trail.push({x:p.x,y:p.y});
+        if (p.trail.length > 30) p.trail.shift();
+
+        // Draw trail
+        ctx.strokeStyle = p.color;
+        ctx.globalAlpha = 0.5;
+        ctx.beginPath();
+        for (let t=0;t<p.trail.length;t++) {
+          let pt = p.trail[t];
+          if (t===0) ctx.moveTo(pt.x,pt.y);
+          else ctx.lineTo(pt.x,pt.y);
+        }
+        ctx.stroke();
+        ctx.globalAlpha = 1.0;
 
         ctx.beginPath();
         ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
@@ -198,7 +213,6 @@
         let dist = Math.sqrt(r2);
 
         if (dist <= bh.radius) {
-          // fade out
           f.fade -= 0.02;
           if (f.fade <= 0) {
             fragments.splice(i,1);
@@ -214,6 +228,22 @@
           f.y += f.vy * dt;
         }
 
+        // Trail
+        if (!f.trail) f.trail = [];
+        f.trail.push({x:f.x,y:f.y});
+        if (f.trail.length > 20) f.trail.shift();
+
+        ctx.strokeStyle = f.color;
+        ctx.globalAlpha = f.fade * 0.5;
+        ctx.beginPath();
+        for (let t=0;t<f.trail.length;t++) {
+          let pt = f.trail[t];
+          if (t===0) ctx.moveTo(pt.x,pt.y);
+          else ctx.lineTo(pt.x,pt.y);
+        }
+        ctx.stroke();
+        ctx.globalAlpha = 1.0;
+
         ctx.beginPath();
         ctx.arc(f.x,f.y,f.r,0,Math.PI*2);
         ctx.fillStyle = f.color;
@@ -223,7 +253,7 @@
       }
     }
 
-    // --- Loop ---
+    // Loop
     let lastTime = performance.now();
     function animate(now) {
       let dt = (now - lastTime)/50;
@@ -240,7 +270,7 @@
     }
     animate(lastTime);
 
-    // UI sliders
+    // UI
     document.getElementById("massSlider").addEventListener("input", e => {
       bh.mass = +e.target.value;
     });
