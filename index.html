@@ -1,173 +1,159 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Black Hole Simulator</title>
+  <meta charset="UTF-8">
+  <title>Black Hole Simulator (Canvas)</title>
   <style>
     body {
       margin: 0;
+      background: black;
       overflow: hidden;
-      background: #000;
       font-family: Arial, sans-serif;
     }
     #overlay {
       position: absolute;
       top: 15px;
       left: 15px;
-      background: rgba(255,255,255,0.9);
+      background: rgba(255, 255, 255, 0.85);
       padding: 12px 18px;
       border-radius: 10px;
       box-shadow: 0 4px 10px rgba(0,0,0,0.3);
       font-size: 14px;
-      line-height: 1.5;
       color: #111;
     }
     #overlay h3 {
       margin: 0 0 6px 0;
       font-size: 16px;
-      font-weight: bold;
     }
-    canvas { display: block; }
+    canvas {
+      display: block;
+    }
   </style>
 </head>
 <body>
   <div id="overlay">
     <h3>🌌 Black Hole Simulator</h3>
-    <p>• Drag mouse to orbit<br>
-       • Scroll to zoom<br>
-       • Watch planets orbit</p>
+    <p>• Stars warp near black hole<br>
+       • Planets orbit via gravity<br>
+       • Pure JS + Canvas</p>
   </div>
 
-  <!-- ✅ Load Three.js locally -->
-  <script src="js/three.min.js"></script>
-  <script src="js/OrbitControls.js"></script>
+  <canvas id="space"></canvas>
 
   <script>
-    console.log("Scene starting…");
+    const canvas = document.getElementById("space");
+    const ctx = canvas.getContext("2d");
+    resizeCanvas();
 
-    // --- SCENE SETUP ---
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x000000);
+    window.addEventListener("resize", resizeCanvas);
 
-    const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 5000);
-    camera.position.set(0, 40, 150);
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setClearColor(0x000000, 1);
-    document.body.appendChild(renderer.domElement);
-
-    const controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-
-    // --- LIGHT ---
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
-    scene.add(ambientLight);
-
-    // --- STARS SKYBOX ---
-    const starCount = 4000;
-    const starGeo = new THREE.BufferGeometry();
-    const starPos = [];
-    const starColors = [];
-
-    for (let i = 0; i < starCount; i++) {
-      let x = (Math.random() - 0.5) * 4000;
-      let y = (Math.random() - 0.5) * 4000;
-      let z = (Math.random() - 0.5) * 4000;
-      starPos.push(x, y, z);
-
-      const palette = [
-        new THREE.Color(1, 1, 1),
-        new THREE.Color(1, 0.8, 0.6),
-        new THREE.Color(0.6, 0.8, 1),
-        new THREE.Color(1, 1, 0.7)
-      ];
-      const c = palette[Math.floor(Math.random() * palette.length)];
-      starColors.push(c.r, c.g, c.b);
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
     }
 
-    starGeo.setAttribute("position", new THREE.Float32BufferAttribute(starPos, 3));
-    starGeo.setAttribute("color", new THREE.Float32BufferAttribute(starColors, 3));
-    const starMat = new THREE.PointsMaterial({ size: 1.2, vertexColors: true });
-    const stars = new THREE.Points(starGeo, starMat);
-    scene.add(stars);
+    // --- Black hole properties ---
+    const bh = { x: canvas.width/2, y: canvas.height/2, mass: 5000, radius: 40 };
 
-    // --- BLACK HOLE ---
-    const blackHoleGeo = new THREE.SphereGeometry(8, 64, 64);
-    const blackHoleMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
-    const blackHole = new THREE.Mesh(blackHoleGeo, blackHoleMat);
-    scene.add(blackHole);
+    // --- Stars ---
+    const stars = [];
+    for (let i = 0; i < 800; i++) {
+      stars.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        color: ["#fff","#ffd27f","#87cefa","#ffaaa5"][Math.floor(Math.random()*4)],
+        size: Math.random()*2
+      });
+    }
 
-    // Accretion disk
-    const diskGeo = new THREE.RingGeometry(10, 20, 128);
-    const diskMat = new THREE.MeshBasicMaterial({
-      color: 0xff6600,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.5
-    });
-    const disk = new THREE.Mesh(diskGeo, diskMat);
-    disk.rotation.x = Math.PI / 2;
-    scene.add(disk);
-
-    // --- PLANETS ---
+    // --- Planets ---
     const planets = [];
-    for (let i = 0; i < 4; i++) {
-      const size = Math.random() * 1.5 + 1;
-      const geo = new THREE.SphereGeometry(size, 32, 32);
-      const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(Math.random(), Math.random(), Math.random()) });
-      const planet = new THREE.Mesh(geo, mat);
-
-      const dist = (i+1) * 25 + Math.random() * 10;
-      planet.position.set(dist, 0, 0);
-
-      planet.userData = {
-        velocity: new THREE.Vector3(0, 0, Math.sqrt(1000 / dist))
-      };
-
-      scene.add(planet);
-      planets.push(planet);
+    for (let i = 0; i < 3; i++) {
+      let dist = 100 + i*80;
+      planets.push({
+        x: bh.x + dist,
+        y: bh.y,
+        vx: 0,
+        vy: Math.sqrt(bh.mass/dist), // orbital speed
+        r: 10 + i*4,
+        color: ["#4cc9f0","#ff006e","#8338ec"][i]
+      });
     }
 
-    // --- GRAVITY FUNCTION ---
-    function applyGravity(planet, dt) {
-      const G = 1000;
-      const massBH = 10000;
-      const pos = planet.position.clone();
-      const r = pos.length();
-      const forceMag = G * massBH / (r * r);
-      const force = pos.clone().normalize().multiplyScalar(-forceMag);
+    function drawBlackHole() {
+      // core
+      ctx.beginPath();
+      ctx.arc(bh.x, bh.y, bh.radius, 0, Math.PI*2);
+      ctx.fillStyle = "black";
+      ctx.fill();
 
-      const acc = force;
-      planet.userData.velocity.add(acc.multiplyScalar(dt));
-      planet.position.add(planet.userData.velocity.clone().multiplyScalar(dt));
+      // accretion glow
+      let gradient = ctx.createRadialGradient(bh.x,bh.y,bh.radius, bh.x,bh.y,bh.radius*3);
+      gradient.addColorStop(0,"rgba(255,150,0,0.7)");
+      gradient.addColorStop(1,"rgba(0,0,0,0)");
+      ctx.beginPath();
+      ctx.arc(bh.x,bh.y,bh.radius*3,0,Math.PI*2);
+      ctx.fillStyle = gradient;
+      ctx.fill();
     }
 
-    // --- ANIMATE ---
+    function drawStars() {
+      stars.forEach(star => {
+        let dx = star.x - bh.x;
+        let dy = star.y - bh.y;
+        let dist = Math.sqrt(dx*dx + dy*dy);
+
+        // warp effect near black hole
+        if (dist < 200) {
+          let factor = 200 / dist;
+          dx *= factor*0.05;
+          dy *= factor*0.05;
+        }
+
+        ctx.fillStyle = star.color;
+        ctx.fillRect(star.x + dx*0.02, star.y + dy*0.02, star.size, star.size);
+      });
+    }
+
+    function drawPlanets(dt) {
+      planets.forEach(p => {
+        // gravity
+        let dx = bh.x - p.x;
+        let dy = bh.y - p.y;
+        let r2 = dx*dx + dy*dy;
+        let dist = Math.sqrt(r2);
+        let force = bh.mass / r2;
+        let ax = force * dx / dist;
+        let ay = force * dy / dist;
+
+        p.vx += ax * dt;
+        p.vy += ay * dt;
+
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+        ctx.fillStyle = p.color;
+        ctx.fill();
+      });
+    }
+
+    // --- Animation ---
     let lastTime = performance.now();
-    function animate() {
-      requestAnimationFrame(animate);
-
-      const now = performance.now();
-      const dt = (now - lastTime) / 1000;
+    function animate(now) {
+      let dt = (now - lastTime)/50; // slow-motion factor
       lastTime = now;
 
-      planets.forEach(p => applyGravity(p, dt));
+      ctx.clearRect(0,0,canvas.width,canvas.height);
 
-      stars.rotation.y += 0.0003;
-      disk.rotation.z += 0.002;
+      drawStars();
+      drawBlackHole();
+      drawPlanets(dt);
 
-      controls.update();
-      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
     }
-    animate();
-
-    // --- RESIZE ---
-    window.addEventListener("resize", () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
+    animate(lastTime);
   </script>
 </body>
 </html>
