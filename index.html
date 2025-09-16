@@ -25,9 +25,7 @@
       margin: 0 0 6px 0;
       font-size: 16px;
     }
-    canvas {
-      display: block;
-    }
+    canvas { display: block; }
   </style>
 </head>
 <body>
@@ -43,21 +41,20 @@
   <script>
     const canvas = document.getElementById("space");
     const ctx = canvas.getContext("2d");
-    resizeCanvas();
-
-    window.addEventListener("resize", resizeCanvas);
 
     function resizeCanvas() {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
     }
+    window.addEventListener("resize", resizeCanvas);
+    resizeCanvas();
 
-    // --- Black hole properties ---
-    const bh = { x: canvas.width/2, y: canvas.height/2, mass: 5000, radius: 40 };
+    // --- Black hole ---
+    const bh = { x: canvas.width/2, y: canvas.height/2, mass: 8000, radius: 40 };
 
     // --- Stars ---
     const stars = [];
-    for (let i = 0; i < 800; i++) {
+    for (let i = 0; i < 1200; i++) {
       stars.push({
         x: Math.random() * canvas.width,
         y: Math.random() * canvas.height,
@@ -69,25 +66,25 @@
     // --- Planets ---
     const planets = [];
     for (let i = 0; i < 3; i++) {
-      let dist = 100 + i*80;
+      let dist = 120 + i*100;
       planets.push({
         x: bh.x + dist,
         y: bh.y,
         vx: 0,
         vy: Math.sqrt(bh.mass/dist), // orbital speed
-        r: 10 + i*4,
+        r: 12 + i*4,
         color: ["#4cc9f0","#ff006e","#8338ec"][i]
       });
     }
 
     function drawBlackHole() {
-      // core
+      // Core
       ctx.beginPath();
       ctx.arc(bh.x, bh.y, bh.radius, 0, Math.PI*2);
       ctx.fillStyle = "black";
       ctx.fill();
 
-      // accretion glow
+      // Glow (accretion disk effect)
       let gradient = ctx.createRadialGradient(bh.x,bh.y,bh.radius, bh.x,bh.y,bh.radius*3);
       gradient.addColorStop(0,"rgba(255,150,0,0.7)");
       gradient.addColorStop(1,"rgba(0,0,0,0)");
@@ -104,18 +101,19 @@
         let dist = Math.sqrt(dx*dx + dy*dy);
 
         // warp effect near black hole
+        let offsetX = 0, offsetY = 0;
         if (dist < 200) {
           let factor = 200 / dist;
-          dx *= factor*0.05;
-          dy *= factor*0.05;
+          offsetX = dx * 0.05 * factor;
+          offsetY = dy * 0.05 * factor;
         }
 
         ctx.fillStyle = star.color;
-        ctx.fillRect(star.x + dx*0.02, star.y + dy*0.02, star.size, star.size);
+        ctx.fillRect(star.x + offsetX, star.y + offsetY, star.size, star.size);
       });
     }
 
-    function drawPlanets(dt) {
+    function updateAndDrawPlanets(dt) {
       planets.forEach(p => {
         // gravity
         let dx = bh.x - p.x;
@@ -132,6 +130,7 @@
         p.x += p.vx * dt;
         p.y += p.vy * dt;
 
+        // Draw
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
         ctx.fillStyle = p.color;
@@ -139,17 +138,17 @@
       });
     }
 
-    // --- Animation ---
+    // --- Animation loop ---
     let lastTime = performance.now();
     function animate(now) {
-      let dt = (now - lastTime)/50; // slow-motion factor
+      let dt = (now - lastTime)/50; // slow down physics
       lastTime = now;
 
       ctx.clearRect(0,0,canvas.width,canvas.height);
 
       drawStars();
       drawBlackHole();
-      drawPlanets(dt);
+      updateAndDrawPlanets(dt);
 
       requestAnimationFrame(animate);
     }
