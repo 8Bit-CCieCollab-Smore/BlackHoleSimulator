@@ -7,18 +7,28 @@
     body {
       margin: 0;
       overflow: hidden;
-      background: radial-gradient(ellipse at center, #000 0%, #050505 100%);
-      color: white;
+      background: #000000; /* Black background for space */
       font-family: Arial, sans-serif;
     }
     #overlay {
       position: absolute;
-      top: 10px;
-      left: 10px;
-      background: rgba(0,0,0,0.6);
-      padding: 10px 15px;
-      border-radius: 8px;
+      top: 15px;
+      left: 15px;
+      background: rgba(255,255,255,0.9); /* White UI box */
+      padding: 12px 18px;
+      border-radius: 10px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
       font-size: 14px;
+      line-height: 1.5;
+      color: #111;
+    }
+    #overlay h3 {
+      margin: 0 0 6px 0;
+      font-size: 16px;
+      font-weight: bold;
+    }
+    canvas {
+      display: block;
     }
   </style>
 </head>
@@ -48,26 +58,26 @@
     controls.enableDamping = true;
 
     // --- LIGHT ---
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambientLight);
 
-    const pointLight = new THREE.PointLight(0xffffff, 1.5, 500);
-    pointLight.position.set(0, 0, 0); // black hole is also a light source
+    const pointLight = new THREE.PointLight(0xffffff, 1.2, 500);
+    pointLight.position.set(0, 0, 0); // from the black hole
     scene.add(pointLight);
 
-    // --- BLACK HOLE (sphere + glow) ---
+    // --- BLACK HOLE ---
     const blackHoleGeo = new THREE.SphereGeometry(6, 64, 64);
     const blackHoleMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
     const blackHole = new THREE.Mesh(blackHoleGeo, blackHoleMat);
     scene.add(blackHole);
 
-    // Accretion disk (ring)
+    // Accretion disk (glowing ring)
     const diskGeo = new THREE.RingGeometry(8, 20, 128);
     const diskMat = new THREE.MeshBasicMaterial({
       color: 0xff6600,
       side: THREE.DoubleSide,
       transparent: true,
-      opacity: 0.4
+      opacity: 0.5
     });
     const disk = new THREE.Mesh(diskGeo, diskMat);
     disk.rotation.x = Math.PI / 2;
@@ -82,20 +92,18 @@
       const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(Math.random(), Math.random(), Math.random()) });
       const planet = new THREE.Mesh(geo, mat);
 
-      // start position
       const dist = (i+1) * 25 + Math.random() * 10;
       planet.position.set(dist, 0, 0);
 
-      // velocity for orbit
       planet.userData = {
-        velocity: new THREE.Vector3(0, 0, Math.sqrt(1000 / dist)) // simple circular orbit
+        velocity: new THREE.Vector3(0, 0, Math.sqrt(1000 / dist))
       };
 
       scene.add(planet);
       planets.push(planet);
     }
 
-    // --- LIGHT BENDING STARS (background stars distorted) ---
+    // --- STARS (for depth) ---
     const starCount = 1000;
     const starGeo = new THREE.BufferGeometry();
     const starPos = [];
@@ -112,14 +120,14 @@
 
     // --- GRAVITY FUNCTION ---
     function applyGravity(planet, dt) {
-      const G = 1000; // gravitational constant (tweak for effect)
-      const massBH = 10000; // black hole mass
+      const G = 1000;
+      const massBH = 10000;
       const pos = planet.position.clone();
       const r = pos.length();
       const forceMag = G * massBH / (r * r);
       const force = pos.clone().normalize().multiplyScalar(-forceMag);
 
-      const acc = force; // assume planet mass = 1
+      const acc = force;
       planet.userData.velocity.add(acc.multiplyScalar(dt));
       planet.position.add(planet.userData.velocity.clone().multiplyScalar(dt));
     }
@@ -135,7 +143,6 @@
 
       planets.forEach(p => applyGravity(p, dt));
 
-      // Light bending trick: scale stars closer to BH
       stars.rotation.y += 0.0005;
       disk.rotation.z += 0.002;
 
