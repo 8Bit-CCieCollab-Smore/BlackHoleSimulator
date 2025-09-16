@@ -7,14 +7,14 @@
     body {
       margin: 0;
       overflow: hidden;
-      background: #000; /* fallback background */
+      background: #000;
       font-family: Arial, sans-serif;
     }
     #overlay {
       position: absolute;
       top: 15px;
       left: 15px;
-      background: rgba(255,255,255,0.9); /* white UI box */
+      background: rgba(255,255,255,0.9);
       padding: 12px 18px;
       border-radius: 10px;
       box-shadow: 0 4px 10px rgba(0,0,0,0.3);
@@ -49,13 +49,13 @@
 
     // --- SCENE SETUP ---
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x000000); // force black
+    scene.background = new THREE.Color(0x000000);
 
     const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 2000);
     camera.position.set(0, 40, 120);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setClearColor(0x000000, 1); // force black clear
+    renderer.setClearColor(0x000000, 1);
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
@@ -63,16 +63,68 @@
     controls.enableDamping = true;
 
     // --- LIGHT ---
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambientLight);
 
     const pointLight = new THREE.PointLight(0xffffff, 1.2, 500);
     pointLight.position.set(0, 0, 0);
     scene.add(pointLight);
 
-    // --- BLACK HOLE ---
+    // --- STARS SKYBOX ---
+    const starCount = 5000;
+    const starGeo = new THREE.BufferGeometry();
+    const starPos = [];
+    const starColors = [];
+
+    for (let i = 0; i < starCount; i++) {
+      let x = (Math.random() - 0.5) * 4000;
+      let y = (Math.random() - 0.5) * 4000;
+      let z = (Math.random() - 0.5) * 4000;
+      starPos.push(x, y, z);
+
+      // random star color (white, blue, yellow, red)
+      const colors = [
+        new THREE.Color(1, 1, 1),   // white
+        new THREE.Color(1, 0.8, 0.6), // orange
+        new THREE.Color(0.6, 0.8, 1), // blue
+        new THREE.Color(1, 1, 0.7)  // yellow
+      ];
+      const c = colors[Math.floor(Math.random() * colors.length)];
+      starColors.push(c.r, c.g, c.b);
+    }
+
+    starGeo.setAttribute("position", new THREE.Float32BufferAttribute(starPos, 3));
+    starGeo.setAttribute("color", new THREE.Float32BufferAttribute(starColors, 3));
+    const starMat = new THREE.PointsMaterial({ size: 1.2, vertexColors: true });
+    const stars = new THREE.Points(starGeo, starMat);
+    scene.add(stars);
+
+    // --- BLACK HOLE with lensing shader ---
     const blackHoleGeo = new THREE.SphereGeometry(6, 64, 64);
-    const blackHoleMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+    const blackHoleMat = new THREE.ShaderMaterial({
+      uniforms: {
+        eventHorizon: { value: 6.0 },
+        glowColor: { value: new THREE.Color(0xffaa55) }
+      },
+      vertexShader: `
+        varying vec3 vNormal;
+        void main() {
+          vNormal = normalize(normalMatrix * normal);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vNormal;
+        uniform float eventHorizon;
+        uniform vec3 glowColor;
+
+        void main() {
+          float intensity = pow(0.9 - dot(vNormal, vec3(0.0,0.0,1.0)), 2.0);
+          vec3 color = mix(vec3(0.0), glowColor, intensity * 2.0);
+          gl_FragColor = vec4(color, 1.0);
+        }
+      `
+    });
     const blackHole = new THREE.Mesh(blackHoleGeo, blackHoleMat);
     scene.add(blackHole);
 
@@ -108,21 +160,6 @@
       planets.push(planet);
     }
 
-    // --- STARS ---
-    const starCount = 1000;
-    const starGeo = new THREE.BufferGeometry();
-    const starPos = [];
-    for (let i = 0; i < starCount; i++) {
-      let x = (Math.random() - 0.5) * 2000;
-      let y = (Math.random() - 0.5) * 2000;
-      let z = (Math.random() - 0.5) * 2000;
-      starPos.push(x, y, z);
-    }
-    starGeo.setAttribute("position", new THREE.Float32BufferAttribute(starPos, 3));
-    const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 1 });
-    const stars = new THREE.Points(starGeo, starMat);
-    scene.add(stars);
-
     // --- GRAVITY FUNCTION ---
     function applyGravity(planet, dt) {
       const G = 1000;
@@ -148,7 +185,7 @@
 
       planets.forEach(p => applyGravity(p, dt));
 
-      stars.rotation.y += 0.0005;
+      stars.rotation.y += 0.0003;
       disk.rotation.z += 0.002;
 
       controls.update();
