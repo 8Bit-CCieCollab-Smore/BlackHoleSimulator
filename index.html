@@ -79,22 +79,32 @@
       });
     }
 
-    function drawBlackHole() {
-      if (diskColors.length > 0) {
-        let slices = diskColors.length;
-        let anglePer = (Math.PI*2) / slices;
-        for (let i = 0; i < slices; i++) {
-          ctx.beginPath();
-          ctx.arc(bh.x,bh.y,bh.radius*3, diskRotation + i*anglePer, diskRotation + (i+1)*anglePer);
-          ctx.arc(bh.x,bh.y,bh.radius, diskRotation + (i+1)*anglePer, diskRotation + i*anglePer, true);
-          ctx.closePath();
-          ctx.fillStyle = diskColors[i];
-          ctx.globalAlpha = 0.6;
-          ctx.fill();
-          ctx.globalAlpha = 1.0;
-        }
-        diskRotation += 0.01;
+    function drawAccretionDisk() {
+      if (diskColors.length === 0) return;
+      const maxRings = 6;
+      const ringThickness = 12;
+      for (let i = 0; i < Math.min(diskColors.length, maxRings); i++) {
+        const color = diskColors[i];
+        const innerR = bh.radius + i * ringThickness;
+        const outerR = innerR + ringThickness;
+        ctx.save();
+        ctx.translate(bh.x, bh.y);
+        ctx.rotate(diskRotation);
+        ctx.beginPath();
+        ctx.arc(0,0,outerR,0,Math.PI*2);
+        ctx.arc(0,0,innerR,Math.PI*2,0,true);
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.6 * (1 - i/maxRings); // fade out older rings
+        ctx.fill();
+        ctx.restore();
+        ctx.globalAlpha = 1.0;
       }
+      diskRotation += 0.01;
+    }
+
+    function drawBlackHole() {
+      drawAccretionDisk();
       ctx.beginPath();
       ctx.arc(bh.x, bh.y, bh.radius, 0, Math.PI*2);
       ctx.fillStyle = "black";
@@ -116,14 +126,12 @@
         let r2 = dx*dx + dy*dy, dist = Math.sqrt(r2);
 
         if (dist <= bh.radius) {
-          // fully consumed
-          diskColors.push(p.color);
-          if (diskColors.length > 8) diskColors = diskColors.slice(-8);
+          diskColors.unshift(p.color); // newest color inside
+          if (diskColors.length > 6) diskColors = diskColors.slice(0,6);
           planets.splice(i,1);
           continue;
         }
         if (dist < bh.radius*2) {
-          // spaghettify: becomes fragments
           planets.splice(i,1);
           for (let j=0;j<8;j++) {
             fragments.push({
@@ -147,7 +155,6 @@
         p.x += p.vx * dt;
         p.y += p.vy * dt;
 
-        // Trail
         p.trail.push({x:p.x,y:p.y});
         if (p.trail.length > 25) p.trail.shift();
         ctx.strokeStyle = p.color;
@@ -174,9 +181,8 @@
         let r2 = dx*dx + dy*dy, dist = Math.sqrt(r2);
 
         if (dist <= bh.radius) {
-          // fragment absorbed: add its color to disk
-          diskColors.push(f.color);
-          if (diskColors.length > 8) diskColors = diskColors.slice(-8);
+          diskColors.unshift(f.color);
+          if (diskColors.length > 6) diskColors = diskColors.slice(0,6);
           fragments.splice(i,1);
           continue;
         }
@@ -189,7 +195,6 @@
         f.x += f.vx * dt;
         f.y += f.vy * dt;
 
-        // Trail
         f.trail.push({x:f.x,y:f.y});
         if (f.trail.length > 15) f.trail.shift();
         ctx.strokeStyle = f.color;
