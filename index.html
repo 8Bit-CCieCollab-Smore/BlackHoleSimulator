@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Black Hole Simulator</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: radial-gradient(ellipse at center, #000 0%, #050505 100%);
+      color: white;
+      font-family: Arial, sans-serif;
+    }
+    #overlay {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.6);
+      padding: 10px 15px;
+      border-radius: 8px;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div id="overlay">
+    <h3>🌌 Black Hole Simulator</h3>
+    <p>• Drag mouse to orbit<br>
+       • Scroll to zoom<br>
+       • Watch planets orbit</p>
+  </div>
+
+  <!-- Three.js -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.161.0/examples/js/controls/OrbitControls.js"></script>
+
+  <script>
+    // --- SCENE SETUP ---
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 2000);
+    camera.position.set(0, 40, 120);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+
+    // --- LIGHT ---
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambientLight);
+
+    const pointLight = new THREE.PointLight(0xffffff, 1.5, 500);
+    pointLight.position.set(0, 0, 0); // black hole is also a light source
+    scene.add(pointLight);
+
+    // --- BLACK HOLE (sphere + glow) ---
+    const blackHoleGeo = new THREE.SphereGeometry(6, 64, 64);
+    const blackHoleMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+    const blackHole = new THREE.Mesh(blackHoleGeo, blackHoleMat);
+    scene.add(blackHole);
+
+    // Accretion disk (ring)
+    const diskGeo = new THREE.RingGeometry(8, 20, 128);
+    const diskMat = new THREE.MeshBasicMaterial({
+      color: 0xff6600,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.4
+    });
+    const disk = new THREE.Mesh(diskGeo, diskMat);
+    disk.rotation.x = Math.PI / 2;
+    scene.add(disk);
+
+    // --- PLANETS ---
+    const planets = [];
+    const planetCount = 4;
+    for (let i = 0; i < planetCount; i++) {
+      const size = Math.random() * 1.5 + 1;
+      const geo = new THREE.SphereGeometry(size, 32, 32);
+      const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(Math.random(), Math.random(), Math.random()) });
+      const planet = new THREE.Mesh(geo, mat);
+
+      // start position
+      const dist = (i+1) * 25 + Math.random() * 10;
+      planet.position.set(dist, 0, 0);
+
+      // velocity for orbit
+      planet.userData = {
+        velocity: new THREE.Vector3(0, 0, Math.sqrt(1000 / dist)) // simple circular orbit
+      };
+
+      scene.add(planet);
+      planets.push(planet);
+    }
+
+    // --- LIGHT BENDING STARS (background stars distorted) ---
+    const starCount = 1000;
+    const starGeo = new THREE.BufferGeometry();
+    const starPos = [];
+    for (let i = 0; i < starCount; i++) {
+      let x = (Math.random() - 0.5) * 2000;
+      let y = (Math.random() - 0.5) * 2000;
+      let z = (Math.random() - 0.5) * 2000;
+      starPos.push(x, y, z);
+    }
+    starGeo.setAttribute("position", new THREE.Float32BufferAttribute(starPos, 3));
+    const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 1 });
+    const stars = new THREE.Points(starGeo, starMat);
+    scene.add(stars);
+
+    // --- GRAVITY FUNCTION ---
+    function applyGravity(planet, dt) {
+      const G = 1000; // gravitational constant (tweak for effect)
+      const massBH = 10000; // black hole mass
+      const pos = planet.position.clone();
+      const r = pos.length();
+      const forceMag = G * massBH / (r * r);
+      const force = pos.clone().normalize().multiplyScalar(-forceMag);
+
+      const acc = force; // assume planet mass = 1
+      planet.userData.velocity.add(acc.multiplyScalar(dt));
+      planet.position.add(planet.userData.velocity.clone().multiplyScalar(dt));
+    }
+
+    // --- ANIMATE ---
+    let lastTime = performance.now();
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const now = performance.now();
+      const dt = (now - lastTime) / 1000;
+      lastTime = now;
+
+      planets.forEach(p => applyGravity(p, dt));
+
+      // Light bending trick: scale stars closer to BH
+      stars.rotation.y += 0.0005;
+      disk.rotation.z += 0.002;
+
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // --- RESIZE ---
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
