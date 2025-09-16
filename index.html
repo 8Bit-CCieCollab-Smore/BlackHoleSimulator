@@ -51,8 +51,8 @@
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
 
-    const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 2000);
-    camera.position.set(0, 40, 120);
+    const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 5000);
+    camera.position.set(0, 40, 150);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setClearColor(0x000000, 1);
@@ -63,15 +63,11 @@
     controls.enableDamping = true;
 
     // --- LIGHT ---
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
     scene.add(ambientLight);
 
-    const pointLight = new THREE.PointLight(0xffffff, 1.2, 500);
-    pointLight.position.set(0, 0, 0);
-    scene.add(pointLight);
-
     // --- STARS SKYBOX ---
-    const starCount = 5000;
+    const starCount = 4000;
     const starGeo = new THREE.BufferGeometry();
     const starPos = [];
     const starColors = [];
@@ -82,14 +78,14 @@
       let z = (Math.random() - 0.5) * 4000;
       starPos.push(x, y, z);
 
-      // random star color (white, blue, yellow, red)
-      const colors = [
-        new THREE.Color(1, 1, 1),   // white
+      // random star color
+      const palette = [
+        new THREE.Color(1, 1, 1),     // white
         new THREE.Color(1, 0.8, 0.6), // orange
         new THREE.Color(0.6, 0.8, 1), // blue
-        new THREE.Color(1, 1, 0.7)  // yellow
+        new THREE.Color(1, 1, 0.7)    // yellow
       ];
-      const c = colors[Math.floor(Math.random() * colors.length)];
+      const c = palette[Math.floor(Math.random() * palette.length)];
       starColors.push(c.r, c.g, c.b);
     }
 
@@ -99,37 +95,14 @@
     const stars = new THREE.Points(starGeo, starMat);
     scene.add(stars);
 
-    // --- BLACK HOLE with lensing shader ---
-    const blackHoleGeo = new THREE.SphereGeometry(6, 64, 64);
-    const blackHoleMat = new THREE.ShaderMaterial({
-      uniforms: {
-        eventHorizon: { value: 6.0 },
-        glowColor: { value: new THREE.Color(0xffaa55) }
-      },
-      vertexShader: `
-        varying vec3 vNormal;
-        void main() {
-          vNormal = normalize(normalMatrix * normal);
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-      `,
-      fragmentShader: `
-        varying vec3 vNormal;
-        uniform float eventHorizon;
-        uniform vec3 glowColor;
-
-        void main() {
-          float intensity = pow(0.9 - dot(vNormal, vec3(0.0,0.0,1.0)), 2.0);
-          vec3 color = mix(vec3(0.0), glowColor, intensity * 2.0);
-          gl_FragColor = vec4(color, 1.0);
-        }
-      `
-    });
+    // --- BLACK HOLE (visible sphere for now) ---
+    const blackHoleGeo = new THREE.SphereGeometry(8, 64, 64);
+    const blackHoleMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
     const blackHole = new THREE.Mesh(blackHoleGeo, blackHoleMat);
     scene.add(blackHole);
 
     // Accretion disk
-    const diskGeo = new THREE.RingGeometry(8, 20, 128);
+    const diskGeo = new THREE.RingGeometry(10, 20, 128);
     const diskMat = new THREE.MeshBasicMaterial({
       color: 0xff6600,
       side: THREE.DoubleSide,
@@ -142,8 +115,7 @@
 
     // --- PLANETS ---
     const planets = [];
-    const planetCount = 4;
-    for (let i = 0; i < planetCount; i++) {
+    for (let i = 0; i < 4; i++) {
       const size = Math.random() * 1.5 + 1;
       const geo = new THREE.SphereGeometry(size, 32, 32);
       const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(Math.random(), Math.random(), Math.random()) });
