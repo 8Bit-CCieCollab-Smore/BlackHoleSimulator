@@ -61,6 +61,7 @@
     const fragments = [];
     let diskColors = [];
     let diskRotation = 0;
+    let waveTime = 0;
 
     function addPlanet() {
       let dist = Math.random() * 250 + 80;
@@ -82,24 +83,46 @@
     function drawAccretionDisk() {
       if (diskColors.length === 0) return;
       const maxRings = 6;
-      const ringThickness = 12;
+      const ringThickness = 14;
+
+      waveTime += 0.05; // animate turbulence
+
       for (let i = 0; i < Math.min(diskColors.length, maxRings); i++) {
         const color = diskColors[i];
         const innerR = bh.radius + i * ringThickness;
         const outerR = innerR + ringThickness;
+
         ctx.save();
         ctx.translate(bh.x, bh.y);
         ctx.rotate(diskRotation);
+
         ctx.beginPath();
-        ctx.arc(0,0,outerR,0,Math.PI*2);
-        ctx.arc(0,0,innerR,Math.PI*2,0,true);
+        const steps = 60; // smoothness of wobble
+        for (let a = 0; a <= steps; a++) {
+          const angle = (a/steps) * Math.PI * 2;
+          const wobble = Math.sin(angle*4 + waveTime + i) * 3; // turbulence
+          const r = outerR + wobble;
+          const x = Math.cos(angle) * r;
+          const y = Math.sin(angle) * r;
+          if (a === 0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+        }
+        for (let a = steps; a >= 0; a--) {
+          const angle = (a/steps) * Math.PI * 2;
+          const wobble = Math.sin(angle*4 + waveTime + i) * 3;
+          const r = innerR + wobble;
+          const x = Math.cos(angle) * r;
+          const y = Math.sin(angle) * r;
+          ctx.lineTo(x,y);
+        }
         ctx.closePath();
+
         ctx.fillStyle = color;
-        ctx.globalAlpha = 0.6 * (1 - i/maxRings); // fade out older rings
+        ctx.globalAlpha = 0.5 * (1 - i/maxRings); // fade older rings
         ctx.fill();
         ctx.restore();
         ctx.globalAlpha = 1.0;
       }
+
       diskRotation += 0.01;
     }
 
@@ -126,7 +149,7 @@
         let r2 = dx*dx + dy*dy, dist = Math.sqrt(r2);
 
         if (dist <= bh.radius) {
-          diskColors.unshift(p.color); // newest color inside
+          diskColors.unshift(p.color);
           if (diskColors.length > 6) diskColors = diskColors.slice(0,6);
           planets.splice(i,1);
           continue;
