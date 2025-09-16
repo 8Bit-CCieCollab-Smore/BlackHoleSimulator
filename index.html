@@ -2,164 +2,86 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Black Hole Simulator</title>
+  <title>Black Hole Simulator (Debug)</title>
   <style>
-    body {
-      margin: 0;
-      overflow: hidden;
-      background: #000;
-      font-family: Arial, sans-serif;
-    }
+    body { margin: 0; overflow: hidden; background: #000; }
     #overlay {
-      position: absolute;
-      top: 15px;
-      left: 15px;
+      position: absolute; top: 15px; left: 15px;
       background: rgba(255,255,255,0.9);
-      padding: 12px 18px;
-      border-radius: 10px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-      font-size: 14px;
-      line-height: 1.5;
+      padding: 10px; border-radius: 6px;
+      font-family: sans-serif; font-size: 14px;
       color: #111;
-    }
-    #overlay h3 {
-      margin: 0 0 6px 0;
-      font-size: 16px;
-      font-weight: bold;
-    }
-    canvas {
-      display: block;
     }
   </style>
 </head>
 <body>
-  <div id="overlay">
-    <h3>🌌 Black Hole Simulator</h3>
-    <p>• Drag mouse to orbit<br>
-       • Scroll to zoom<br>
-       • Watch planets orbit</p>
-  </div>
+  <div id="overlay">🌌 Debug: Stars + Planets should be visible</div>
 
-  <!-- Three.js -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.161.0/examples/js/controls/OrbitControls.js"></script>
 
   <script>
-    console.log("Scene running…");
+    console.log("Scene starting…");
 
-    // --- SCENE SETUP ---
+    // --- SCENE ---
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
 
-    const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 5000);
-    camera.position.set(0, 40, 150);
+    const camera = new THREE.PerspectiveCamera(65, window.innerWidth/window.innerHeight, 0.1, 5000);
+    camera.position.set(0, 50, 200);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setClearColor(0x000000, 1);
     renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setClearColor(0x000000, 1);
     document.body.appendChild(renderer.domElement);
 
     const controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
 
-    // --- LIGHT ---
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
-    scene.add(ambientLight);
-
-    // --- STARS SKYBOX ---
-    const starCount = 4000;
+    // --- STARS ---
+    const starCount = 2000;
     const starGeo = new THREE.BufferGeometry();
-    const starPos = [];
-    const starColors = [];
-
+    const positions = [];
     for (let i = 0; i < starCount; i++) {
-      let x = (Math.random() - 0.5) * 4000;
-      let y = (Math.random() - 0.5) * 4000;
-      let z = (Math.random() - 0.5) * 4000;
-      starPos.push(x, y, z);
-
-      // random star color
-      const palette = [
-        new THREE.Color(1, 1, 1),     // white
-        new THREE.Color(1, 0.8, 0.6), // orange
-        new THREE.Color(0.6, 0.8, 1), // blue
-        new THREE.Color(1, 1, 0.7)    // yellow
-      ];
-      const c = palette[Math.floor(Math.random() * palette.length)];
-      starColors.push(c.r, c.g, c.b);
+      const x = (Math.random() - 0.5) * 2000;
+      const y = (Math.random() - 0.5) * 2000;
+      const z = (Math.random() - 0.5) * 2000;
+      positions.push(x, y, z);
     }
-
-    starGeo.setAttribute("position", new THREE.Float32BufferAttribute(starPos, 3));
-    starGeo.setAttribute("color", new THREE.Float32BufferAttribute(starColors, 3));
-    const starMat = new THREE.PointsMaterial({ size: 1.2, vertexColors: true });
+    starGeo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 5 }); // BIG stars
     const stars = new THREE.Points(starGeo, starMat);
     scene.add(stars);
+    console.log("Stars added:", starCount);
 
-    // --- BLACK HOLE (visible sphere for now) ---
-    const blackHoleGeo = new THREE.SphereGeometry(8, 64, 64);
-    const blackHoleMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
-    const blackHole = new THREE.Mesh(blackHoleGeo, blackHoleMat);
+    // --- "BLACK HOLE" (gray so it shows) ---
+    const bhGeo = new THREE.SphereGeometry(20, 32, 32); // oversized
+    const bhMat = new THREE.MeshBasicMaterial({ color: 0x555555 });
+    const blackHole = new THREE.Mesh(bhGeo, bhMat);
     scene.add(blackHole);
-
-    // Accretion disk
-    const diskGeo = new THREE.RingGeometry(10, 20, 128);
-    const diskMat = new THREE.MeshBasicMaterial({
-      color: 0xff6600,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.5
-    });
-    const disk = new THREE.Mesh(diskGeo, diskMat);
-    disk.rotation.x = Math.PI / 2;
-    scene.add(disk);
+    console.log("Black hole added");
 
     // --- PLANETS ---
     const planets = [];
-    for (let i = 0; i < 4; i++) {
-      const size = Math.random() * 1.5 + 1;
-      const geo = new THREE.SphereGeometry(size, 32, 32);
-      const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(Math.random(), Math.random(), Math.random()) });
+    for (let i = 0; i < 3; i++) {
+      const geo = new THREE.SphereGeometry(10, 32, 32); // oversized
+      const mat = new THREE.MeshBasicMaterial({ color: 0xff0000 + i*5000 }); // different colors
       const planet = new THREE.Mesh(geo, mat);
-
-      const dist = (i+1) * 25 + Math.random() * 10;
-      planet.position.set(dist, 0, 0);
-
-      planet.userData = {
-        velocity: new THREE.Vector3(0, 0, Math.sqrt(1000 / dist))
-      };
-
+      planet.position.set((i+1)*60, 0, 0);
       scene.add(planet);
       planets.push(planet);
-    }
-
-    // --- GRAVITY FUNCTION ---
-    function applyGravity(planet, dt) {
-      const G = 1000;
-      const massBH = 10000;
-      const pos = planet.position.clone();
-      const r = pos.length();
-      const forceMag = G * massBH / (r * r);
-      const force = pos.clone().normalize().multiplyScalar(-forceMag);
-
-      const acc = force;
-      planet.userData.velocity.add(acc.multiplyScalar(dt));
-      planet.position.add(planet.userData.velocity.clone().multiplyScalar(dt));
+      console.log("Planet added at distance:", (i+1)*60);
     }
 
     // --- ANIMATE ---
-    let lastTime = performance.now();
     function animate() {
       requestAnimationFrame(animate);
-
-      const now = performance.now();
-      const dt = (now - lastTime) / 1000;
-      lastTime = now;
-
-      planets.forEach(p => applyGravity(p, dt));
-
-      stars.rotation.y += 0.0003;
-      disk.rotation.z += 0.002;
-
+      planets.forEach((p, idx) => {
+        p.rotation.y += 0.01;
+        p.position.x = Math.cos(Date.now()*0.001 + idx) * (60*(idx+1));
+        p.position.z = Math.sin(Date.now()*0.001 + idx) * (60*(idx+1));
+      });
+      stars.rotation.y += 0.0005;
       controls.update();
       renderer.render(scene, camera);
     }
