@@ -38,9 +38,9 @@
        • Watch planets orbit</p>
   </div>
 
-  <!-- ✅ FIXED: load Three.js from unpkg -->
-  <script src="https://unpkg.com/three@0.161.0/build/three.min.js"></script>
-  <script src="https://unpkg.com/three@0.161.0/examples/js/controls/OrbitControls.js"></script>
+  <!-- ✅ Load Three.js locally -->
+  <script src="js/three.min.js"></script>
+  <script src="js/OrbitControls.js"></script>
 
   <script>
     console.log("Scene starting…");
@@ -76,12 +76,11 @@
       let z = (Math.random() - 0.5) * 4000;
       starPos.push(x, y, z);
 
-      // random star color
       const palette = [
-        new THREE.Color(1, 1, 1),     // white
-        new THREE.Color(1, 0.8, 0.6), // orange
-        new THREE.Color(0.6, 0.8, 1), // blue
-        new THREE.Color(1, 1, 0.7)    // yellow
+        new THREE.Color(1, 1, 1),
+        new THREE.Color(1, 0.8, 0.6),
+        new THREE.Color(0.6, 0.8, 1),
+        new THREE.Color(1, 1, 0.7)
       ];
       const c = palette[Math.floor(Math.random() * palette.length)];
       starColors.push(c.r, c.g, c.b);
