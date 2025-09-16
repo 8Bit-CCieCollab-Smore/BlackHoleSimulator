@@ -7,14 +7,14 @@
     body {
       margin: 0;
       overflow: hidden;
-      background: #000000; /* Black background for space */
+      background: #000; /* fallback background */
       font-family: Arial, sans-serif;
     }
     #overlay {
       position: absolute;
       top: 15px;
       left: 15px;
-      background: rgba(255,255,255,0.9); /* White UI box */
+      background: rgba(255,255,255,0.9); /* white UI box */
       padding: 12px 18px;
       border-radius: 10px;
       box-shadow: 0 4px 10px rgba(0,0,0,0.3);
@@ -45,12 +45,17 @@
   <script src="https://cdn.jsdelivr.net/npm/three@0.161.0/examples/js/controls/OrbitControls.js"></script>
 
   <script>
+    console.log("Scene running…");
+
     // --- SCENE SETUP ---
     const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x000000); // force black
+
     const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 2000);
     camera.position.set(0, 40, 120);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setClearColor(0x000000, 1); // force black clear
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
@@ -62,7 +67,7 @@
     scene.add(ambientLight);
 
     const pointLight = new THREE.PointLight(0xffffff, 1.2, 500);
-    pointLight.position.set(0, 0, 0); // from the black hole
+    pointLight.position.set(0, 0, 0);
     scene.add(pointLight);
 
     // --- BLACK HOLE ---
@@ -71,7 +76,7 @@
     const blackHole = new THREE.Mesh(blackHoleGeo, blackHoleMat);
     scene.add(blackHole);
 
-    // Accretion disk (glowing ring)
+    // Accretion disk
     const diskGeo = new THREE.RingGeometry(8, 20, 128);
     const diskMat = new THREE.MeshBasicMaterial({
       color: 0xff6600,
@@ -103,7 +108,7 @@
       planets.push(planet);
     }
 
-    // --- STARS (for depth) ---
+    // --- STARS ---
     const starCount = 1000;
     const starGeo = new THREE.BufferGeometry();
     const starPos = [];
