@@ -54,7 +54,6 @@
       <button onclick="addPlanet()">➕ Add Planet</button>
       <label>Mass <input type="range" min="2000" max="20000" value="8000" step="500" id="massSlider"></label>
       <label>Radius <input type="range" min="20" max="100" value="50" step="5" id="radiusSlider"></label>
-      <label>Stars <input type="range" min="500" max="3000" value="1500" step="100" id="starsSlider"></label>
     </div>
   </div>
 
@@ -74,24 +73,22 @@
     // --- Black hole ---
     const bh = { x: canvas.width/2, y: canvas.height/2, mass: 8000, radius: 50 };
 
-    // --- Stars (parallax layers) ---
-    let stars = [];
-    function generateStars(count) {
-      stars = [];
-      for (let i = 0; i < count; i++) {
-        stars.push({
-          x: Math.random() * canvas.width,
-          y: Math.random() * canvas.height,
-          color: ["#fff","#ffd27f","#87cefa","#ffaaa5"][Math.floor(Math.random()*4)],
-          size: Math.random()*2,
-          depth: Math.random()*3+1 // fake depth
-        });
-      }
+    // --- Stars ---
+    const stars = [];
+    for (let i = 0; i < 1500; i++) {
+      stars.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        color: ["#fff","#ffd27f","#87cefa","#ffaaa5"][Math.floor(Math.random()*4)],
+        size: Math.random()*2
+      });
     }
-    generateStars(1500);
 
-    // --- Planets ---
+    // --- Planets & Fragments ---
     const planets = [];
+    const fragments = [];
+    const diskColors = []; // stores colors of consumed planets
+    let diskRotation = 0;
 
     function addPlanet() {
       let dist = Math.random() * 250 + 80;
@@ -99,31 +96,38 @@
       let x = bh.x + dist * Math.cos(angle);
       let y = bh.y + dist * Math.sin(angle);
 
-      // Give them a small random initial push (not perfect orbit)
       let speed = Math.sqrt(bh.mass/dist) * (0.6 + Math.random()*0.8);
       let vx = -Math.sin(angle) * speed;
       let vy = Math.cos(angle) * speed;
 
       planets.push({
         x, y, vx, vy,
-        r: Math.random()*6+6,
+        r: Math.random()*6+8,
         color: ["#4cc9f0","#ff006e","#8338ec","#06d6a0"][Math.floor(Math.random()*4)],
-        alive: true,
-        fade: 1.0
+        alive: true
       });
     }
 
     function drawBlackHole() {
-      // glow first
-      let gradient = ctx.createRadialGradient(bh.x,bh.y,bh.radius, bh.x,bh.y,bh.radius*3);
-      gradient.addColorStop(0,"rgba(255,180,0,0.8)");
-      gradient.addColorStop(1,"rgba(0,0,0,0)");
-      ctx.beginPath();
-      ctx.arc(bh.x,bh.y,bh.radius*3,0,Math.PI*2);
-      ctx.fillStyle = gradient;
-      ctx.fill();
+      // accretion disk (if any planets have been eaten)
+      if (diskColors.length > 0) {
+        let slices = diskColors.length;
+        let anglePer = (Math.PI*2) / slices;
 
-      // then draw solid black core
+        for (let i = 0; i < slices; i++) {
+          ctx.beginPath();
+          ctx.arc(bh.x,bh.y,bh.radius*3, diskRotation + i*anglePer, diskRotation + (i+1)*anglePer);
+          ctx.arc(bh.x,bh.y,bh.radius, diskRotation + (i+1)*anglePer, diskRotation + i*anglePer, true);
+          ctx.closePath();
+          ctx.fillStyle = diskColors[i];
+          ctx.globalAlpha = 0.6;
+          ctx.fill();
+          ctx.globalAlpha = 1.0;
+        }
+        diskRotation += 0.01; // spin clockwise
+      }
+
+      // solid black core
       ctx.beginPath();
       ctx.arc(bh.x, bh.y, bh.radius, 0, Math.PI*2);
       ctx.fillStyle = "black";
@@ -132,65 +136,94 @@
 
     function drawStars() {
       stars.forEach(star => {
-        let dx = star.x - bh.x;
-        let dy = star.y - bh.y;
-        let dist = Math.sqrt(dx*dx + dy*dy);
-
-        // warp stars near black hole
-        let offsetX = 0, offsetY = 0;
-        if (dist < 250) {
-          let factor = 250 / dist;
-          offsetX = dx * 0.02 * factor;
-          offsetY = dy * 0.02 * factor;
-        }
-
         ctx.fillStyle = star.color;
-        ctx.globalAlpha = 0.5 + (3-star.depth)/3;
-        ctx.fillRect(star.x + offsetX, star.y + offsetY, star.size, star.size);
-        ctx.globalAlpha = 1.0;
+        ctx.fillRect(star.x, star.y, star.size, star.size);
       });
     }
 
-    function updateAndDrawPlanets(dt) {
-      planets.forEach(p => {
-        if (p.alive) {
-          // gravity
-          let dx = bh.x - p.x;
-          let dy = bh.y - p.y;
-          let r2 = dx*dx + dy*dy;
-          let dist = Math.sqrt(r2);
+    function updatePlanets(dt) {
+      for (let i = planets.length-1; i >= 0; i--) {
+        let p = planets[i];
+        if (!p.alive) continue;
 
-          if (dist <= bh.radius) {
-            // Planet is consumed
-            p.alive = false;
-            p.vx = 0; p.vy = 0;
-          } else {
-            let force = bh.mass / r2;
-            let ax = force * dx / dist;
-            let ay = force * dy / dist;
-            p.vx += ax * dt;
-            p.vy += ay * dt;
-            p.x += p.vx * dt;
-            p.y += p.vy * dt;
+        let dx = bh.x - p.x;
+        let dy = bh.y - p.y;
+        let r2 = dx*dx + dy*dy;
+        let dist = Math.sqrt(r2);
+
+        // Spaghettify if within danger zone
+        if (dist < bh.radius*2) {
+          planets.splice(i,1); // remove planet
+          for (let j=0;j<8;j++) {
+            fragments.push({
+              x: p.x, y: p.y,
+              vx: p.vx * (0.5+Math.random()*0.5),
+              vy: p.vy * (0.5+Math.random()*0.5),
+              r: p.r/3,
+              color: p.color,
+              fade: 1.0
+            });
+          }
+          continue;
+        }
+
+        if (dist <= bh.radius) {
+          // Consumed
+          diskColors.push(p.color);
+          planets.splice(i,1);
+          continue;
+        }
+
+        let force = bh.mass / r2;
+        let ax = force * dx / dist;
+        let ay = force * dy / dist;
+        p.vx += ax * dt;
+        p.vy += ay * dt;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+        ctx.fillStyle = p.color;
+        ctx.fill();
+      }
+    }
+
+    function updateFragments(dt) {
+      for (let i = fragments.length-1; i >= 0; i--) {
+        let f = fragments[i];
+        let dx = bh.x - f.x;
+        let dy = bh.y - f.y;
+        let r2 = dx*dx + dy*dy;
+        let dist = Math.sqrt(r2);
+
+        if (dist <= bh.radius) {
+          // fade out
+          f.fade -= 0.02;
+          if (f.fade <= 0) {
+            fragments.splice(i,1);
+            continue;
           }
         } else {
-          // fade out absorbed planets
-          p.fade -= 0.01;
-          if (p.fade < 0) p.fade = 0;
+          let force = bh.mass / r2;
+          let ax = force * dx / dist;
+          let ay = force * dy / dist;
+          f.vx += ax * dt;
+          f.vy += ay * dt;
+          f.x += f.vx * dt;
+          f.y += f.vy * dt;
         }
 
-        if (p.fade > 0) {
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
-          ctx.fillStyle = p.alive ? p.color : "black";
-          ctx.globalAlpha = p.fade;
-          ctx.fill();
-          ctx.globalAlpha = 1.0;
-        }
-      });
+        ctx.beginPath();
+        ctx.arc(f.x,f.y,f.r,0,Math.PI*2);
+        ctx.fillStyle = f.color;
+        ctx.globalAlpha = f.fade;
+        ctx.fill();
+        ctx.globalAlpha = 1.0;
+      }
     }
 
-    // --- Animation loop ---
+    // --- Loop ---
     let lastTime = performance.now();
     function animate(now) {
       let dt = (now - lastTime)/50;
@@ -200,21 +233,19 @@
 
       drawStars();
       drawBlackHole();
-      updateAndDrawPlanets(dt);
+      updatePlanets(dt);
+      updateFragments(dt);
 
       requestAnimationFrame(animate);
     }
     animate(lastTime);
 
-    // --- UI slider bindings ---
+    // UI sliders
     document.getElementById("massSlider").addEventListener("input", e => {
       bh.mass = +e.target.value;
     });
     document.getElementById("radiusSlider").addEventListener("input", e => {
       bh.radius = +e.target.value;
-    });
-    document.getElementById("starsSlider").addEventListener("input", e => {
-      generateStars(+e.target.value);
     });
   </script>
 </body>
