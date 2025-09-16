@@ -20,6 +20,7 @@
       box-shadow: 0 4px 10px rgba(0,0,0,0.3);
       font-size: 14px;
       color: #111;
+      width: 220px;
     }
     #overlay h3 {
       margin: 0 0 6px 0;
@@ -28,29 +29,32 @@
     #controls {
       margin-top: 8px;
     }
+    #controls button, #controls input {
+      margin-top: 6px;
+      width: 100%;
+    }
     #controls button {
       background: #111;
       color: #fff;
       border: none;
       padding: 6px 12px;
-      margin-top: 5px;
       border-radius: 6px;
       cursor: pointer;
     }
     #controls button:hover {
       background: #444;
     }
-    canvas { display: block; }
   </style>
 </head>
 <body>
   <div id="overlay">
     <h3>🌌 Black Hole Simulator</h3>
-    <p>• Stars warp near black hole<br>
-       • Add planets with button<br>
-       • Planets fall in & fade out</p>
+    <p>Add planets, tweak settings:</p>
     <div id="controls">
       <button onclick="addPlanet()">➕ Add Planet</button>
+      <label>Mass <input type="range" min="2000" max="20000" value="8000" step="500" id="massSlider"></label>
+      <label>Radius <input type="range" min="20" max="100" value="50" step="5" id="radiusSlider"></label>
+      <label>Stars <input type="range" min="500" max="3000" value="1500" step="100" id="starsSlider"></label>
     </div>
   </div>
 
@@ -71,16 +75,20 @@
     const bh = { x: canvas.width/2, y: canvas.height/2, mass: 8000, radius: 50 };
 
     // --- Stars (parallax layers) ---
-    const stars = [];
-    for (let i = 0; i < 1500; i++) {
-      stars.push({
-        x: Math.random() * canvas.width,
-        y: Math.random() * canvas.height,
-        color: ["#fff","#ffd27f","#87cefa","#ffaaa5"][Math.floor(Math.random()*4)],
-        size: Math.random()*2,
-        depth: Math.random()*3+1 // used for parallax
-      });
+    let stars = [];
+    function generateStars(count) {
+      stars = [];
+      for (let i = 0; i < count; i++) {
+        stars.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          color: ["#fff","#ffd27f","#87cefa","#ffaaa5"][Math.floor(Math.random()*4)],
+          size: Math.random()*2,
+          depth: Math.random()*3+1 // fake depth
+        });
+      }
     }
+    generateStars(1500);
 
     // --- Planets ---
     const planets = [];
@@ -90,32 +98,35 @@
       let angle = Math.random() * Math.PI * 2;
       let x = bh.x + dist * Math.cos(angle);
       let y = bh.y + dist * Math.sin(angle);
-      let speed = Math.sqrt(bh.mass/dist);
+
+      // Give them a small random initial push (not perfect orbit)
+      let speed = Math.sqrt(bh.mass/dist) * (0.6 + Math.random()*0.8);
       let vx = -Math.sin(angle) * speed;
       let vy = Math.cos(angle) * speed;
+
       planets.push({
         x, y, vx, vy,
         r: Math.random()*6+6,
         color: ["#4cc9f0","#ff006e","#8338ec","#06d6a0"][Math.floor(Math.random()*4)],
         alive: true,
-        fade: 1.0 // 1 = full visible, 0 = gone
+        fade: 1.0
       });
     }
 
     function drawBlackHole() {
-      // core (super black)
-      ctx.beginPath();
-      ctx.arc(bh.x, bh.y, bh.radius, 0, Math.PI*2);
-      ctx.fillStyle = "#000000";
-      ctx.fill();
-
-      // accretion glow
+      // glow first
       let gradient = ctx.createRadialGradient(bh.x,bh.y,bh.radius, bh.x,bh.y,bh.radius*3);
-      gradient.addColorStop(0,"rgba(255,150,0,0.8)");
+      gradient.addColorStop(0,"rgba(255,180,0,0.8)");
       gradient.addColorStop(1,"rgba(0,0,0,0)");
       ctx.beginPath();
       ctx.arc(bh.x,bh.y,bh.radius*3,0,Math.PI*2);
       ctx.fillStyle = gradient;
+      ctx.fill();
+
+      // then draw solid black core
+      ctx.beginPath();
+      ctx.arc(bh.x, bh.y, bh.radius, 0, Math.PI*2);
+      ctx.fillStyle = "black";
       ctx.fill();
     }
 
@@ -125,7 +136,7 @@
         let dy = star.y - bh.y;
         let dist = Math.sqrt(dx*dx + dy*dy);
 
-        // subtle warp effect near black hole
+        // warp stars near black hole
         let offsetX = 0, offsetY = 0;
         if (dist < 250) {
           let factor = 250 / dist;
@@ -150,32 +161,28 @@
           let dist = Math.sqrt(r2);
 
           if (dist <= bh.radius) {
-            // Planet is "consumed"
+            // Planet is consumed
             p.alive = false;
             p.vx = 0; p.vy = 0;
           } else {
             let force = bh.mass / r2;
             let ax = force * dx / dist;
             let ay = force * dy / dist;
-
             p.vx += ax * dt;
             p.vy += ay * dt;
-
             p.x += p.vx * dt;
             p.y += p.vy * dt;
           }
         } else {
-          // Dead planet fades
+          // fade out absorbed planets
           p.fade -= 0.01;
           if (p.fade < 0) p.fade = 0;
         }
 
-        // Draw planet (skip if fully gone)
         if (p.fade > 0) {
           ctx.beginPath();
           ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
-          let col = p.alive ? p.color : "#000000";
-          ctx.fillStyle = col;
+          ctx.fillStyle = p.alive ? p.color : "black";
           ctx.globalAlpha = p.fade;
           ctx.fill();
           ctx.globalAlpha = 1.0;
@@ -198,6 +205,17 @@
       requestAnimationFrame(animate);
     }
     animate(lastTime);
+
+    // --- UI slider bindings ---
+    document.getElementById("massSlider").addEventListener("input", e => {
+      bh.mass = +e.target.value;
+    });
+    document.getElementById("radiusSlider").addEventListener("input", e => {
+      bh.radius = +e.target.value;
+    });
+    document.getElementById("starsSlider").addEventListener("input", e => {
+      generateStars(+e.target.value);
+    });
   </script>
 </body>
 </html>
