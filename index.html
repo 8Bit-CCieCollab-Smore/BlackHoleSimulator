@@ -97,10 +97,10 @@
         ctx.rotate(diskRotation);
 
         ctx.beginPath();
-        const steps = 60; // smoothness of wobble
+        const steps = 60;
         for (let a = 0; a <= steps; a++) {
           const angle = (a/steps) * Math.PI * 2;
-          const wobble = Math.sin(angle*4 + waveTime + i) * 3; // turbulence
+          const wobble = Math.sin(angle*4 + waveTime + i) * 3;
           const r = outerR + wobble;
           const x = Math.cos(angle) * r;
           const y = Math.sin(angle) * r;
@@ -116,18 +116,21 @@
         }
         ctx.closePath();
 
+        ctx.shadowBlur = 20;         // glow
+        ctx.shadowColor = color;     // glow color
         ctx.fillStyle = color;
-        ctx.globalAlpha = 0.5 * (1 - i/maxRings); // fade older rings
+        ctx.globalAlpha = 0.35 * (1 - i/maxRings); // fade older rings
         ctx.fill();
         ctx.restore();
         ctx.globalAlpha = 1.0;
       }
 
-      diskRotation += 0.01;
+      diskRotation -= 0.01; // clockwise (negative)
     }
 
     function drawBlackHole() {
       drawAccretionDisk();
+      ctx.shadowBlur = 0;
       ctx.beginPath();
       ctx.arc(bh.x, bh.y, bh.radius, 0, Math.PI*2);
       ctx.fillStyle = "black";
