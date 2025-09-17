@@ -1,5 +1,4 @@
-# BlackHoleSimulator
-Black Hole Simulator
+# Black Hole Simulator For Chromebooks
 
 This game was made with HTML and CSS and JS, with the help of a Coder Helper :D
 
