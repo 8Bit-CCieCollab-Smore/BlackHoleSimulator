@@ -982,33 +982,34 @@
 
   </script>
 
-  <!-- Hidden YouTube background audio -->
+<!-- Enable Music Button -->
+<button id="enableAudioBtn" style="position:absolute;top:50%;left:50%;
+  transform:translate(-50%,-50%);z-index:999;font-size:18px;padding:12px 20px;">
+  ▶ Enable Music
+</button>
+
 <div id="ytplayer"></div>
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
   var player;
   function onYouTubeIframeAPIReady() {
     player = new YT.Player('ytplayer', {
-      height: '0',
-      width: '0',   // hide the video
+      height: '0', width: '0',
       videoId: 'MU3EOO4fWQo',
       playerVars: {
-        autoplay: 1,
-        controls: 0,
-        modestbranding: 1,
-        loop: 1,
-        playlist: 'MU3EOO4fWQo',  // needed for loop
-        start: 0,
-        end: 383  // 6 minutes 23 seconds = 383 seconds
-      },
-      events: {
-        onReady: function(e){
-          e.target.setVolume(30);  // change volume if desired
-          e.target.playVideo();
-        }
+        controls: 0, modestbranding: 1, loop: 1,
+        playlist: 'MU3EOO4fWQo', start: 0, end: 383
       }
     });
   }
+
+  document.getElementById('enableAudioBtn').addEventListener('click', function(){
+    if (player && player.playVideo) {
+      player.setVolume(30);
+      player.playVideo();
+    }
+    this.style.display = 'none'; // hide button once clicked
+  });
 </script>
   
 </body>
