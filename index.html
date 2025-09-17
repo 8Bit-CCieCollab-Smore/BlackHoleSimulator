@@ -1,4 +1,4 @@
-html = r"""<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -981,5 +981,35 @@ html = r"""<!DOCTYPE html>
   requestAnimationFrame(tick);
 
   </script>
+
+  <!-- Hidden YouTube background audio -->
+<div id="ytplayer"></div>
+<script src="https://www.youtube.com/iframe_api"></script>
+<script>
+  var player;
+  function onYouTubeIframeAPIReady() {
+    player = new YT.Player('ytplayer', {
+      height: '0',
+      width: '0',   // hide the video
+      videoId: 'MU3EOO4fWQo',
+      playerVars: {
+        autoplay: 1,
+        controls: 0,
+        modestbranding: 1,
+        loop: 1,
+        playlist: 'MU3EOO4fWQo',  // needed for loop
+        start: 0,
+        end: 383  // 6 minutes 23 seconds = 383 seconds
+      },
+      events: {
+        onReady: function(e){
+          e.target.setVolume(30);  // change volume if desired
+          e.target.playVideo();
+        }
+      }
+    });
+  }
+</script>
+  
 </body>
 </html>
