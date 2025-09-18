@@ -691,37 +691,6 @@
       });
     }
   }
-
-function draw() {
-  // === FIXED BACKGROUND GRID (not affected by camera) ===
-  ctx.setTransform(1, 0, 0, 1, 0, 0); // reset to screen space
-  ctx.fillStyle = "#222"; // brighter gray background
-  ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
-
-  ctx.strokeStyle = "rgba(255,255,255,0.25)"; // brighter white grid
-  ctx.lineWidth = 1;
-  const gridSize = 80;
-  for (let x = 0; x < window.innerWidth; x += gridSize) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, window.innerHeight);
-    ctx.stroke();
-  }
-  for (let y = 0; y < window.innerHeight; y += gridSize) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(window.innerWidth, y);
-    ctx.stroke();
-  }
-
-  // === Restore camera transform for world objects ===
-  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  ctx.translate(window.innerWidth / (2 * DPR), window.innerHeight / (2 * DPR));
-  ctx.scale(cam.s, cam.s);
-  ctx.translate(-cam.x, -cam.y);
-
-  // === your world drawing code continues here ===
-}
     
     // Nebulae
     if (nebulaEnabled){
