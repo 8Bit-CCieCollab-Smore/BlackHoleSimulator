@@ -692,12 +692,13 @@
     }
   }
 
- function draw(){
-  // --- Static background grid (not affected by camera) ---
-  ctx.fillStyle = "#000"; // pure black base
+function draw() {
+  // === FIXED BACKGROUND GRID (not affected by camera) ===
+  ctx.setTransform(1, 0, 0, 1, 0, 0); // reset any scaling/panning
+  ctx.fillStyle = "#222"; // brighter gray background
   ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
 
-  ctx.strokeStyle = "rgba(255,255,255,0.15)"; // brighter white
+  ctx.strokeStyle = "rgba(255,255,255,0.25)"; // brighter grid lines
   ctx.lineWidth = 1;
   const gridSize = 80;
   for (let x = 0; x < window.innerWidth; x += gridSize) {
@@ -712,6 +713,18 @@
     ctx.lineTo(window.innerWidth, y);
     ctx.stroke();
   }
+
+  // restore camera transform for world objects
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.scale(cam.s, cam.s);
+  ctx.translate(
+    window.innerWidth / (2 * DPR) - cam.x * cam.s,
+    window.innerHeight / (2 * DPR) - cam.y * cam.s
+  );
+
+  // === continue drawing stars, planets, BHs, etc. ===
+}
+
 
     // Nebulae
     if (nebulaEnabled){
