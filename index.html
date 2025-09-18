@@ -693,11 +693,11 @@
   }
 
  function draw(){
-  // Draw background (dark gray with grid)
-  ctx.fillStyle = "#111";  // base gray
+  // --- Static background grid (not affected by camera) ---
+  ctx.fillStyle = "#000"; // pure black base
   ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
 
-  ctx.strokeStyle = "rgba(255,255,255,0.04)"; // faint white grid
+  ctx.strokeStyle = "rgba(255,255,255,0.15)"; // brighter white
   ctx.lineWidth = 1;
   const gridSize = 80;
   for (let x = 0; x < window.innerWidth; x += gridSize) {
