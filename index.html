@@ -832,20 +832,17 @@
       ctx.globalAlpha = 1;
     }
 
-    // sparks
-    for (const sp of sparks){
-      const s = worldToScreen(sp.x, sp.y);
-      const a = Math.max(0, sp.life / sp.max);
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = a;
-      ctx.shadowBlur = 20;
-      ctx.shadowColor = 'rgba(255,220,150,1)';
-      ctx.fillStyle = 'rgba(255,220,150,1)';
-      ctx.beginPath(); ctx.arc(s.x, s.y, 2.0, 0, TAU); ctx.fill();
-      ctx.restore();
-    }
-
+   // sparks (simplified, no glow)
+for (const sp of sparks){
+  const s = worldToScreen(sp.x, sp.y);
+  const a = Math.max(0, sp.life / sp.max);
+  ctx.globalAlpha = a;
+  ctx.fillStyle = "white";
+  ctx.beginPath();
+  ctx.arc(s.x, s.y, 2.0, 0, TAU);
+  ctx.fill();
+}
+ctx.globalAlpha = 1;
     // Object list refresh (lightweight each frame)
     drawObjectList();
   }
