@@ -1,229 +1,696 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Black Hole Simulator</title>
-  <style>
-    body { margin:0; overflow:hidden; background:#111; color:white; font-family:sans-serif; }
-    #ui {
-      position:absolute; top:10px; left:10px;
-      background:rgba(0,0,0,0.6); padding:10px; border-radius:8px;
-    }
-    #ui button,#ui select,#ui input { margin:4px; }
-    canvas { display:block; }
-  </style>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>2D Black Hole + Fluid Gravity Simulator (Single File)</title>
+<style>
+  :root{
+    --bg0:#0a0b12; --bg1:#0f1220; --panel:#111420cc; --text:#e8ecff; --muted:#aab2d6;
+    --accent:#69d6ff; --accent2:#b38cff; --ok:#72ffad; --warn:#ffd36b; --danger:#ff7b7b;
+  }
+  html,body{margin:0;height:100%;background:radial-gradient(1200px 900px at 70% 30%, #131a32 0%, #0b0d16 60%, #08090e 100%); color:var(--text); font:14px/1.2 system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif; overflow:hidden}
+  #wrap{position:fixed; inset:0}
+  canvas{position:absolute; inset:0; width:100%; height:100%; display:block; image-rendering:pixelated}
+  #ui{position:absolute; top:12px; left:12px; width:310px; max-height:88vh; overflow:auto; background:var(--panel); backdrop-filter: blur(6px); border:1px solid #1b2140; border-radius:16px; box-shadow:0 10px 30px #0008; padding:12px}
+  #ui h1{font-size:16px; margin:0 0 8px; letter-spacing:.3px}
+  #ui .row{display:flex; gap:8px; margin:8px 0; align-items:center}
+  #ui .row label{flex:1; color:var(--muted)}
+  #ui .row input[type=range]{flex:2}
+  #ui .btns{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+  button{background:#1a1f39; color:var(--text); border:1px solid #2a3260; border-radius:10px; padding:8px 10px; cursor:pointer}
+  button:hover{border-color:#3b4890}
+  .pill{display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; background:#171a2c; border:1px solid #273062}
+  input[type=checkbox]{transform:scale(1.1)}
+  small{color:var(--muted)}
+  #legend{position:absolute; right:12px; top:12px; background:var(--panel); border:1px solid #1b2140; padding:10px 12px; border-radius:14px}
+  #fps{color:var(--muted)}
+  .nameTag{position:absolute; pointer-events:none; color:#e6eaff; text-shadow:0 0 6px #000,0 0 12px #000; font-weight:600}
+</style>
 </head>
 <body>
-  <canvas id="sim"></canvas>
+<div id="wrap">
+  <canvas id="c"></canvas>
   <div id="ui">
-    <select id="objectType">
-      <option value="blackhole">Black Hole</option>
-      <option value="star">Star</option>
-      <option value="planet">Planet</option>
-    </select>
-    <button id="addObject">Add</button>
-    <button id="clear">Clear</button>
-    <label>
-      Speed:
-      <input type="range" id="speed" min="0.1" max="3" step="0.1" value="1">
-    </label>
+    <h1>🌀 Black Hole + Fluid Gravity</h1>
+    <div class="btns">
+      <button id="addBH">+ Black Hole</button>
+      <button id="addStar">+ Star</button>
+      <button id="addPlanet">+ Planet</button>
+      <button id="addSolar">☀️ Solar System</button>
+      <button id="clear">🧹 Clear</button>
+      <button id="reset">♻️ Reset View</button>
+    </div>
+    <div class="row"><label>Gravity G: <b id="gVal"></b></label><input id="g" type="range" min="0" max="2" step="0.001"></div>
+    <div class="row"><label>Time Scale: <b id="tsVal"></b></label><input id="ts" type="range" min="0.1" max="3" step="0.01"></div>
+    <div class="row"><label>Fluid Viscosity: <b id="visVal"></b></label><input id="vis" type="range" min="0.0" max="0.02" step="0.0005"></div>
+    <div class="row"><label>Fluid Diffusion: <b id="difVal"></b></label><input id="dif" type="range" min="0.0" max="0.01" step="0.0005"></div>
+    <div class="row"><label>Radiation/Accretion</label><input id="acc" type="checkbox" checked><span class="pill"><small>BH glow</small></span></div>
+    <div class="row"><label>Fluid Drag on Bodies</label><input id="drag" type="checkbox" checked></div>
+    <div class="row"><label>Trails</label><input id="trails" type="checkbox"></div>
+    <div class="row"><label>Dither (debands)</label><input id="dither" type="checkbox" checked></div>
+    <div class="row"><label>Labels</label><input id="labels" type="checkbox" checked></div>
+    <div class="row"><label>Max Bodies: <b id="mbVal"></b></label><input id="maxb" type="range" min="10" max="300" step="10"></div>
+    <div class="row"><small>Mouse: drag to stir fluid • Wheel over a body: adjust mass • Drag body with Shift</small></div>
+    <div class="row"><span id="fps" aria-live="polite">FPS</span></div>
   </div>
-  <script>
-    const canvas=document.getElementById("sim");
-    const ctx=canvas.getContext("2d");
-    resizeCanvas(); window.addEventListener("resize",resizeCanvas);
+  <div id="legend"><small>
+    <b>Legend</b><br/>
+    ● Star • mass, glow<br/>
+    ● Planet • small, colored<br/>
+    ● ▲ Black hole • event horizon, accretion<br/>
+  </small></div>
+</div>
 
-    let objects=[], particles=[], simulationSpeed=1;
+<script>
+(() => {
+  // ======= Utilities =======
+  const rand = (a=0,b=1)=>a+Math.random()*(b-a);
+  const TAU = Math.PI*2;
+  const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+  const lerp=(a,b,t)=>a+(b-a)*t;
+  const mix=(a,b,t)=>a+(b-a)*t;
+  const hypot=(x,y)=>Math.sqrt(x*x+y*y);
 
-    class Body{
-      constructor(x,y,mass,type){
-        this.x=x; this.y=y;
-        this.vx=0; this.vy=0;
-        this.mass=mass; this.type=type;
-        this.radius=Math.cbrt(mass)*2;
-        this.destroyed=false;
-      }
-      draw(){
-        ctx.beginPath();
-        if(this.type==="blackhole"){
-          ctx.fillStyle="black";
-          ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);
-          ctx.fill();
-        } else {
-          ctx.fillStyle=this.type==="star"?"yellow":"lightblue";
-          ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);
-          ctx.fill();
-        }
-      }
+  // ======= Canvas & DPI =======
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const DPR = Math.max(1, Math.min(2, window.devicePixelRatio||1));
+  let W=0,H=0, CX=0,CY=0;
+  function resize(){
+    W = Math.floor(window.innerWidth);
+    H = Math.floor(window.innerHeight);
+    canvas.width = Math.floor(W*DPR);
+    canvas.height = Math.floor(H*DPR);
+    canvas.style.width = W+'px';
+    canvas.style.height = H+'px';
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    CX=W/2; CY=H/2;
+    fluidResize();
+  }
+  window.addEventListener('resize', resize);
+
+  // ======= Names =======
+  const NAME = {
+    systems: ["Solar","Alpha Centauri","TRAPPIST-1","Kepler-90","Kepler-11","HIP 68468","HD 219134","TOI-700","Gliese 581","KIC 8462852","LHS 1140"],
+    stars: ["Sun","Sirius","Proxima","Betelgeuse","Rigel","Vega","Altair","Deneb","Arcturus","Polaris","Tau Ceti","Epsilon Eridani","Kepler-452"],
+    planets: ["Mercury","Venus","Earth","Mars","Jupiter","Saturn","Uranus","Neptune","Kepler-186f","Kepler-22b","Kepler-62f","Proxima b","TRAPPIST-1e","LHS 1140 b","Gliese 581g","HD 209458 b","WASP-12b","K2-18b"],
+    blackholes: ["Sagittarius A*","M87*","Cygnus X-1","LMC X-3","NGC 1277*","GRO J1655-40","A0620-00","V404 Cygni","M60-UCD1*","TON 618"]
+  };
+
+  // ======= Bodies =======
+  const bodies = [];
+  const trails = [];
+  const MAX_TRAIL = 80;
+
+  const TYPE = { BH:'bh', STAR:'star', PLANET:'planet' };
+  function makeBody(type, opts={}){
+    const b = {
+      id: Math.random().toString(36).slice(2),
+      type,
+      x: opts.x ?? rand(W*0.25, W*0.75),
+      y: opts.y ?? rand(H*0.25, H*0.75),
+      vx: opts.vx ?? rand(-30,30),
+      vy: opts.vy ?? rand(-30,30),
+      m:  opts.m ?? (type===TYPE.BH ? rand(2e4, 8e4) : type===TYPE.STAR ? rand(3e3, 1.5e4) : rand(50,700)),
+      r:  0, // computed
+      name: opts.name ?? randomName(type),
+      color: opts.color ?? pickColor(type),
+      acc: {x:0,y:0},
+      locked: false
+    };
+    b.r = radiusFromMass(b.m, type);
+    bodies.push(b);
+    trails.push([]);
+    return b;
+  }
+  function radiusFromMass(m, type){
+    if(type===TYPE.BH){
+      // pseudo Schwarzschild radius scale
+      return Math.max(4, Math.sqrt(m)/10);
+    } else if(type===TYPE.STAR){
+      return Math.max(2, Math.pow(m,0.35));
+    } else { // planet
+      return Math.max(2, Math.pow(m,0.33));
     }
-
-    class Particle{
-      constructor(x,y,vx,vy,color){
-        this.x=x; this.y=y;
-        this.vx=vx; this.vy=vy;
-        this.color=color;
-        this.life=2000;
-        this.history=[];
-      }
-      update(bh){
-        let dx=bh.x-this.x, dy=bh.y-this.y;
-        let distSq=dx*dx+dy*dy, dist=Math.sqrt(distSq);
-        let G=2.0;
-        let F=G/(distSq+1);
-        this.vx+=F*dx/dist*simulationSpeed;
-        this.vy+=F*dy/dist*simulationSpeed;
-
-        // drag for stability
-        this.vx*=0.9995;
-        this.vy*=0.9995;
-
-        this.x+=this.vx*simulationSpeed;
-        this.y+=this.vy*simulationSpeed;
-
-        this.history.push({x:this.x,y:this.y});
-        if(this.history.length>30) this.history.shift();
-        this.life--;
-      }
-      draw(){
-        ctx.strokeStyle=this.color;
-        ctx.globalAlpha=Math.max(this.life/2000,0.2);
-        ctx.beginPath();
-        for(let i=0;i<this.history.length;i++){
-          let p=this.history[i];
-          if(i===0) ctx.moveTo(p.x,p.y); else ctx.lineTo(p.x,p.y);
-        }
-        ctx.stroke();
-        ctx.globalAlpha=1;
-      }
+  }
+  function pickColor(type){
+    if(type===TYPE.BH) return '#9be1ff';
+    if(type===TYPE.STAR){
+      const hues = ['#ffd07a','#fff3c2','#ffe3a1','#d6e6ff','#ffdcdc'];
+      return hues[(Math.random()*hues.length)|0];
     }
+    // planet palette
+    const p = ['#8fd3ff','#9ae6b4','#eab1ff','#ffd6a5','#c0b6ff','#a1f0ff','#ffadbc','#9cffd1','#d1ffe2','#c6f7ff'];
+    return p[(Math.random()*p.length)|0];
+  }
+  function randomName(type){
+    if(type===TYPE.BH) return NAME.blackholes[(Math.random()*NAME.blackholes.length)|0];
+    if(type===TYPE.STAR) return NAME.stars[(Math.random()*NAME.stars.length)|0];
+    return NAME.planets[(Math.random()*NAME.planets.length)|0];
+  }
 
-    function spawnDisk(bh,color){
-      for(let ang=0;ang<Math.PI*2;ang+=0.15){
-        let r=bh.radius*4+Math.random()*25;
-        let px=bh.x+Math.cos(ang)*r;
-        let py=bh.y+Math.sin(ang)*r;
-        // tangential velocity
-        let orbital=Math.sqrt(bh.mass)/r*4;
-        let vx=-Math.sin(ang)*orbital;
-        let vy=Math.cos(ang)*orbital;
-        particles.push(new Particle(px,py,vx,vy,color));
-      }
+  // ======= Physics (Gravity) =======
+  const params = {
+    G: 0.6,       // gravitational constant (tunable)
+    dtScale: 1.0, // time scale
+    maxBodies: 150,
+    fluid: {N: 120, M: 70, diffusion: 0.001, viscosity: 0.004, iterations: 16},
+    accretion: true,
+    dragOnBodies: true,
+    drawTrails: false,
+    drawLabels: true,
+    dither: true
+  };
+
+  function gravityStep(dt){
+    // N-body gravity with softening and leapfrog
+    const n=bodies.length;
+    for(let i=0;i<n;i++){
+      bodies[i].acc.x = 0; bodies[i].acc.y = 0;
     }
+    for(let i=0;i<n;i++){
+      const bi = bodies[i];
+      for(let j=i+1;j<n;j++){
+        const bj = bodies[j];
+        const dx = bj.x - bi.x, dy = bj.y - bi.y;
+        const dist2 = dx*dx+dy*dy + 25; // softening
+        const dist = Math.sqrt(dist2);
+        const force = params.G * bi.m * bj.m / dist2;
+        const fx = force * dx / dist;
+        const fy = force * dy / dist;
+        bi.acc.x += fx/bi.m;
+        bi.acc.y += fy/bi.m;
+        bj.acc.x -= fx/bj.m;
+        bj.acc.y -= fy/bj.m;
 
-    function updatePhysics(){
-      for(let i=0;i<objects.length;i++){
-        let a=objects[i]; if(a.destroyed) continue;
-        for(let j=i+1;j<objects.length;j++){
-          let b=objects[j]; if(b.destroyed) continue;
-          let dx=b.x-a.x, dy=b.y-a.y;
-          let distSq=dx*dx+dy*dy, dist=Math.sqrt(distSq);
-          if(dist<1) continue;
-          let F=(a.mass*b.mass)/distSq;
-          let fx=F*dx/dist, fy=F*dy/dist;
-          a.vx+=fx/a.mass*simulationSpeed*0.02;
-          a.vy+=fy/a.mass*simulationSpeed*0.02;
-          b.vx-=fx/b.mass*simulationSpeed*0.02;
-          b.vy-=fy/b.mass*simulationSpeed*0.02;
-
-          // spaghettify stars into disk
-          if((a.type!=="blackhole"&&b.type==="blackhole")||(b.type!=="blackhole"&&a.type==="blackhole")){
-            let star=a.type==="blackhole"?b:a;
-            let bh=a.type==="blackhole"?a:b;
-            if(dist<bh.radius*8 && !star.destroyed){
-              star.mass*=0.995;
-              star.radius=Math.cbrt(star.mass)*2;
-              // shed orbital fragments
-              if(Math.random()<0.3){
-                let angle=Math.atan2(star.y-bh.y,star.x-bh.x);
-                let r=dist;
-                let orbital=Math.sqrt(bh.mass)/r*4;
-                let vx=-Math.sin(angle)*orbital;
-                let vy=Math.cos(angle)*orbital;
-                particles.push(new Particle(star.x,star.y,vx,vy,star.type==="star"?"orange":"lightblue"));
-              }
-              if(star.mass<15){
-                star.destroyed=true;
-                spawnDisk(bh,star.type==="star"?"orange":"lightblue");
-              }
-            }
+        // Accretion if black hole overlap (merge mass, conserve momentum)
+        if(params.accretion && (bi.type===TYPE.BH || bj.type===TYPE.BH)){
+          const ri = bi.r, rj = bj.r;
+          if(dist < Math.max(ri,rj)*0.9){
+            const eater = bi.type===TYPE.BH ? bi : bj;
+            const food  = bi.type===TYPE.BH ? bj : bi;
+            // Merge
+            const totalM = eater.m + food.m;
+            eater.vx = (eater.vx*eater.m + food.vx*food.m)/totalM;
+            eater.vy = (eater.vy*eater.m + food.vy*food.m)/totalM;
+            eater.m = totalM;
+            eater.r = radiusFromMass(eater.m, TYPE.BH);
+            // remove food
+            const idx = bodies.indexOf(food);
+            if(idx>-1){ bodies.splice(idx,1); trails.splice(idx,1); }
+            // splash into fluid (shock)
+            injectVortex(eater.x,eater.y, 150, 1.5);
           }
         }
       }
-
-      // update objects
-      for(let obj of objects){
-        if(obj.destroyed) continue;
-        obj.x+=obj.vx*simulationSpeed;
-        obj.y+=obj.vy*simulationSpeed;
-      }
-
-      // update particles
-      let bh=objects.find(o=>o.type==="blackhole");
-      if(bh){
-        for(let p of particles) p.update(bh);
-        particles=particles.filter(p=>p.life>0);
-      }
     }
+    // integrate (leapfrog: v_{t+1/2} then x_{t+1})
+    for(let i=0;i<n;i++){
+      const b = bodies[i];
+      b.vx += b.acc.x * dt;
+      b.vy += b.acc.y * dt;
 
-    function distortPoint(x,y){
-      let ox=0,oy=0;
-      for(let obj of objects){
-        if(obj.type!=="blackhole") continue;
-        let dx=x-obj.x, dy=y-obj.y;
-        let distSq=dx*dx+dy*dy, dist=Math.sqrt(distSq);
-        if(dist<400){
-          let s=(obj.radius*400)/(distSq+50);
-          ox+=-dx/dist*s; oy+=-dy/dist*s;
+      // Fluid drag
+      if(params.dragOnBodies){
+        const u = sampleU(b.x,b.y), v = sampleV(b.x,b.y);
+        b.vx += (u - b.vx) * 0.02 * clamp(b.r/30, 0.2, 1.3);
+        b.vy += (v - b.vy) * 0.02 * clamp(b.r/30, 0.2, 1.3);
+      }
+
+      if(!b.locked){
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
+      }
+
+      // Wrap edges for planets; stars bounce lightly; BH wrap
+      if(b.type===TYPE.PLANET){
+        if(b.x<0) b.x+=W; if(b.x>W) b.x-=W;
+        if(b.y<0) b.y+=H; if(b.y>H) b.y-=H;
+      } else if(b.type===TYPE.STAR){
+        if(b.x<0||b.x>W){ b.vx*=-0.4; b.x=clamp(b.x, 0, W); }
+        if(b.y<0||b.y>H){ b.vy*=-0.4; b.y=clamp(b.y, 0, H); }
+      } else {
+        if(b.x<0) b.x+=W; if(b.x>W) b.x-=W;
+        if(b.y<0) b.y+=H; if(b.y>H) b.y-=H;
+      }
+
+      // Radiate/stir fluid from massive bodies
+      const stir = clamp(b.m/40000, .2, 2.2);
+      addSource(b.x,b.y, stir*0.4, 0.0, 0.0);
+      injectVortex(b.x,b.y, 20+ b.r*2, (b.type===TYPE.BH? -0.8: 0.35) * stir);
+    }
+  }
+
+  // ======= Fluid (Stable Fluids, Jos Stam) =======
+  // Scalar density + velocity (u,v). Low-res grid, advected each frame.
+  let N=0, M=0, size=0;
+  let dens, dens0, u, v, u0, v0;
+  function IX(x,y){ return x + y*(N+2); }
+  function fluidAlloc(){
+    N = Math.floor(params.fluid.N);
+    M = Math.floor(params.fluid.M);
+    size = (N+2)*(M+2);
+    dens = new Float32Array(size);
+    dens0= new Float32Array(size);
+    u    = new Float32Array(size);
+    v    = new Float32Array(size);
+    u0   = new Float32Array(size);
+    v0   = new Float32Array(size);
+  }
+  function fluidResize(){
+    // keep proportions
+    const scale = Math.sqrt((W*H)/(1280*720));
+    params.fluid.N = clamp(Math.round(110*scale), 64, 200);
+    params.fluid.M = clamp(Math.round(70*scale),  40, 140);
+    fluidAlloc();
+  }
+
+  function addDensity(x,y, amount){
+    const i = Math.floor((x/W)*(N+2)); const j = Math.floor((y/H)*(M+2));
+    if(i<1||i>N||j<1||j>M) return;
+    dens[IX(i,j)] += amount;
+  }
+  function addVelocity(x,y, amountU, amountV){
+    const i = Math.floor((x/W)*(N+2)); const j = Math.floor((y/H)*(M+2));
+    if(i<1||i>N||j<1||j>M) return;
+    u[IX(i,j)] += amountU;
+    v[IX(i,j)] += amountV;
+  }
+  function addSource(x,y, d, du, dv){
+    addDensity(x,y,d);
+    addVelocity(x,y,du,dv);
+  }
+  function set_bnd(b, x){
+    for(let i=1;i<=N;i++){ x[IX(i,0)]= b===2? -x[IX(i,1)] : x[IX(i,1)]; x[IX(i,M+1)]= b===2? -x[IX(i,M)] : x[IX(i,M)]; }
+    for(let j=1;j<=M;j++){ x[IX(0,j)]= b===1? -x[IX(1,j)] : x[IX(1,j)]; x[IX(N+1,j)]= b===1? -x[IX(N,j)] : x[IX(N,j)]; }
+    x[IX(0,0)]       = 0.5*(x[IX(1,0)]+x[IX(0,1)]);
+    x[IX(0,M+1)]     = 0.5*(x[IX(1,M+1)]+x[IX(0,M)]);
+    x[IX(N+1,0)]     = 0.5*(x[IX(N,0)]+x[IX(N+1,1)]);
+    x[IX(N+1,M+1)]   = 0.5*(x[IX(N,M+1)]+x[IX(N+1,M)]);
+  }
+  function lin_solve(b, x, x0, a, c){
+    const iters=params.fluid.iterations;
+    for(let k=0;k<iters;k++){
+      for(let j=1;j<=M;j++){
+        for(let i=1;i<=N;i++){
+          x[IX(i,j)] = (x0[IX(i,j)] + a*( x[IX(i-1,j)] + x[IX(i+1,j)] + x[IX(i,j-1)] + x[IX(i,j+1)] ))/c;
         }
       }
-      return [x+ox,y+oy];
+      set_bnd(b,x);
     }
+  }
+  function diffuse(b, x, x0, diff, dt){
+    const a = dt*diff*N*M;
+    lin_solve(b,x,x0,a,1+4*a);
+  }
+  function advect(b, d, d0, u, v, dt){
+    const dt0x = dt*N, dt0y = dt*M;
+    for(let j=1;j<=M;j++){
+      for(let i=1;i<=N;i++){
+        let x = i - dt0x * u[IX(i,j)];
+        let y = j - dt0y * v[IX(i,j)];
+        if(x<0.5) x=0.5; if(x>N+0.5) x=N+0.5;
+        if(y<0.5) y=0.5; if(y>M+0.5) y=M+0.5;
+        const i0=Math.floor(x), i1=i0+1;
+        const j0=Math.floor(y), j1=j0+1;
+        const s1=x-i0, s0=1-s1;
+        const t1=y-j0, t0=1-t1;
+        d[IX(i,j)] = s0*(t0*d0[IX(i0,j0)] + t1*d0[IX(i0,j1)])
+                   + s1*(t0*d0[IX(i1,j0)] + t1*d0[IX(i1,j1)]);
+      }
+    }
+    set_bnd(b,d);
+  }
+  function project(u,v,p,div){
+    for(let j=1;j<=M;j++){
+      for(let i=1;i<=N;i++){
+        div[IX(i,j)] = -0.5*( u[IX(i+1,j)] - u[IX(i-1,j)] + v[IX(i,j+1)] - v[IX(i,j-1)] )/Math.max(N,M);
+        p[IX(i,j)] = 0;
+      }
+    }
+    set_bnd(0,div); set_bnd(0,p);
+    lin_solve(0,p,div,1,4);
+    for(let j=1;j<=M;j++){
+      for(let i=1;i<=N;i++){
+        u[IX(i,j)] -= 0.5*Math.max(N,M)*( p[IX(i+1,j)] - p[IX(i-1,j)] );
+        v[IX(i,j)] -= 0.5*Math.max(N,M)*( p[IX(i,j+1)] - p[IX(i,j-1)] );
+      }
+    }
+    set_bnd(1,u); set_bnd(2,v);
+  }
+  function vel_step(u,v,u0,v0,visc,dt){
+    diffuse(1,u0,u,visc,dt);
+    diffuse(2,v0,v,visc,dt);
+    project(u0,v0,u,v);
+    advect(1,u,u0,u0,v0,dt);
+    advect(2,v,v0,u0,v0,dt);
+    project(u,v,u0,v0);
+  }
+  function dens_step(x,x0,u,v,diff,dt){
+    diffuse(0,x0,x,diff,dt);
+    advect(0,x,x0,u,v,dt);
+  }
 
-    function drawGrid(){
-      let step=60;
-      ctx.strokeStyle="rgba(200,200,200,0.2)";
-      for(let x=0;x<canvas.width;x+=step){
+  function injectVortex(x,y, radius, strength){
+    const ci = Math.floor((x/W)*(N+2)), cj = Math.floor((y/H)*(M+2));
+    const r = Math.max(1, Math.floor(radius*(N/W)));
+    for(let j=-r;j<=r;j++){
+      for(let i=-r;i<=r;i++){
+        const ii=ci+i, jj=cj+j;
+        if(ii<1||ii>N||jj<1||jj>M) continue;
+        const dx=i, dy=j;
+        const d = Math.sqrt(dx*dx+dy*dy)+1e-6;
+        if(d<=r){
+          const tangx = -dy/d, tangy = dx/d;
+          const s = strength * (1 - d/r);
+          u[IX(ii,jj)] += tangx * s;
+          v[IX(ii,jj)] += tangy * s;
+          dens[IX(ii,jj)] += Math.max(0, 0.6*s);
+        }
+      }
+    }
+  }
+
+  function sampleU(x,y){
+    const i = clamp((x/W)*(N+2),1,N), j = clamp((y/H)*(M+2),1,M);
+    const i0=Math.floor(i), j0=Math.floor(j);
+    return u[IX(i0,j0)]*40; // scale back up to px/s
+  }
+  function sampleV(x,y){
+    const i = clamp((x/W)*(N+2),1,N), j = clamp((y/H)*(M+2),1,M);
+    const i0=Math.floor(i), j0=Math.floor(j);
+    return v[IX(i0,j0)]*40;
+  }
+
+  // ======= Rendering =======
+  const nameLayer = document.createElement('div'); document.body.appendChild(nameLayer);
+  function drawBackground(){
+    // soft starfield + optional dithering
+    if(params.dither){
+      const imgData = ctx.getImageData(0,0,W,H);
+      const d = imgData.data;
+      for(let y=0;y<H;y+=2){
+        for(let x=0;x<W;x+=2){
+          const i = ((y*W)+x)*4;
+          const n = (Math.random()*12)|0; // ordered-ish noise
+          d[i]   = d[i]  + n;
+          d[i+1] = d[i+1]+ n;
+          d[i+2] = d[i+2]+ n;
+        }
+      }
+      ctx.putImageData(imgData,0,0);
+    }
+    // sprinkle stars
+    ctx.save();
+    ctx.globalAlpha = 0.4;
+    for(let i=0;i<60;i++){
+      const x= (Math.random()*W)|0, y=(Math.random()*H)|0, r= Math.random()*1.4;
+      ctx.fillStyle = 'white';
+      ctx.beginPath(); ctx.arc(x,y,r,0,TAU); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawFluid(){
+    // draw density field as nebula
+    const cw = N, ch = M;
+    const image = ctx.createImageData(cw, ch);
+    for(let j=1;j<=M;j++){
+      for(let i=1;i<=N;i++){
+        const di = dens[IX(i,j)];
+        const vmag = Math.hypot(u[IX(i,j)], v[IX(i,j)]);
+        const c = clamp(di*180 + vmag*80, 0, 255);
+        const idx = ((j-1)*cw + (i-1)) * 4;
+        // cool purple-blue palette
+        image.data[idx]   = (c*0.6)|0;
+        image.data[idx+1] = (c*0.45)|0;
+        image.data[idx+2] = (c)|0;
+        image.data[idx+3] = clamp(30 + c*0.85, 0, 255)|0;
+      }
+    }
+    // upscale with smoothing
+    ctx.imageSmoothingEnabled = true;
+    const sw = cw, sh = ch;
+    const tmp = document.createElement('canvas'); tmp.width=cw; tmp.height=ch;
+    const tctx = tmp.getContext('2d');
+    tctx.putImageData(image,0,0);
+    ctx.globalCompositeOperation='lighter';
+    ctx.globalAlpha = 0.9;
+    ctx.drawImage(tmp, 0,0,sw,sh, 0,0,W,H);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation='source-over';
+  }
+
+  function drawBodies(dt){
+    // trails
+    if(params.drawTrails){
+      ctx.save();
+      ctx.globalAlpha = 0.6;
+      ctx.lineWidth = 1.2;
+      for(let i=0;i<bodies.length;i++){
+        const t = trails[i]; if(!t) continue;
+        t.push([bodies[i].x, bodies[i].y]);
+        if(t.length>MAX_TRAIL) t.shift();
+        ctx.strokeStyle = bodies[i].color;
         ctx.beginPath();
-        for(let y=0;y<=canvas.height;y+=step){
-          let [dx,dy]=distortPoint(x,y);
-          if(y===0) ctx.moveTo(dx,dy); else ctx.lineTo(dx,dy);
+        for(let k=0;k<t.length;k++){
+          const p=t[k];
+          if(k===0) ctx.moveTo(p[0],p[1]); else ctx.lineTo(p[0],p[1]);
         }
         ctx.stroke();
       }
-      for(let y=0;y<canvas.height;y+=step){
-        ctx.beginPath();
-        for(let x=0;x<=canvas.width;x+=step){
-          let [dx,dy]=distortPoint(x,y);
-          if(x===0) ctx.moveTo(dx,dy); else ctx.lineTo(dx,dy);
-        }
-        ctx.stroke();
+      ctx.restore();
+    } else {
+      // store minimal trail (for subtle glow)
+      for(let i=0;i<trails.length;i++){
+        const t=trails[i]; if(!t) continue; t.length=0;
       }
     }
 
-    function render(){
-      ctx.fillStyle="rgba(17,17,17,0.5)";
-      ctx.fillRect(0,0,canvas.width,canvas.height);
-      drawGrid();
-      for(let obj of objects) if(!obj.destroyed) obj.draw();
-      for(let p of particles) p.draw();
+    // bodies
+    for(let i=0;i<bodies.length;i++){
+      const b = bodies[i];
+      if(b.type===TYPE.BH){
+        // event horizon + lensing-ish glow
+        const r = b.r;
+        const grd = ctx.createRadialGradient(b.x,b.y, r*0.4, b.x,b.y, r*2.2);
+        grd.addColorStop(0, '#ffffff');
+        grd.addColorStop(0.15, '#9be1ff');
+        grd.addColorStop(0.25, '#5bb8ff');
+        grd.addColorStop(0.4, 'rgba(20,30,60,0.6)');
+        grd.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grd;
+        ctx.beginPath(); ctx.arc(b.x,b.y,r*2.2,0,TAU); ctx.fill();
+        // horizon
+        ctx.fillStyle = '#02040a';
+        ctx.beginPath(); ctx.arc(b.x,b.y, r, 0, TAU); ctx.fill();
+      } else if(b.type===TYPE.STAR){
+        const r = b.r;
+        const grd = ctx.createRadialGradient(b.x,b.y, r*0.4, b.x,b.y, r*2.4);
+        grd.addColorStop(0, '#fff6d6');
+        grd.addColorStop(0.2, b.color);
+        grd.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grd;
+        ctx.beginPath(); ctx.arc(b.x,b.y, r*2.4, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath(); ctx.arc(b.x,b.y, r*0.8, 0, TAU); ctx.fill();
+      } else {
+        // planet
+        const r=b.r;
+        ctx.fillStyle = b.color;
+        ctx.beginPath(); ctx.arc(b.x,b.y,r,0,TAU); ctx.fill();
+        // spec highlight
+        ctx.globalAlpha=0.6;
+        ctx.fillStyle='#ffffff';
+        ctx.beginPath(); ctx.arc(b.x-r*0.3,b.y-r*0.3, r*0.3, 0, TAU); ctx.fill();
+        ctx.globalAlpha=1;
+      }
+      if(params.drawLabels) drawLabel(b);
+    }
+  }
+
+  // lightweight DOM label placement
+  const labelNodes = new Map();
+  function drawLabel(b){
+    let node = labelNodes.get(b.id);
+    if(!node){
+      node = document.createElement('div');
+      node.className='nameTag';
+      document.body.appendChild(node);
+      labelNodes.set(b.id,node);
+    }
+    node.textContent = `${b.name} (${b.type})`;
+    node.style.left = (b.x + 8) + 'px';
+    node.style.top  = (b.y - b.r - 14) + 'px';
+    node.style.display = 'block';
+  }
+  function hideAllLabels(){
+    for(const n of labelNodes.values()) n.style.display='none';
+  }
+
+  // ======= Interaction =======
+  let mouse = { down:false, x:0,y:0, px:0,py:0, shift:false };
+  canvas.addEventListener('pointerdown', e=>{
+    mouse.down=true; mouse.x=e.clientX; mouse.y=e.clientY; mouse.px=mouse.x; mouse.py=mouse.y; mouse.shift=e.shiftKey;
+    if(mouse.shift){
+      // pick nearest body to drag
+      let best=null,bd=1e9;
+      for(const b of bodies){
+        const d = (b.x-mouse.x)**2+(b.y-mouse.y)**2;
+        if(d < bd && Math.sqrt(d) < Math.max(20,b.r+18)){ bd=d; best=b; }
+      }
+      if(best){ best.locked=true; best.vx=0; best.vy=0; best.x=mouse.x; best.y=mouse.y; canvas.setPointerCapture(e.pointerId); }
+    }
+  });
+  canvas.addEventListener('pointermove', e=>{
+    const ox=mouse.x, oy=mouse.y;
+    mouse.x=e.clientX; mouse.y=e.clientY; mouse.shift=e.shiftKey;
+    if(mouse.down){
+      if(mouse.shift){
+        // drag body
+        let target=null,bd=1e9;
+        for(const b of bodies){
+          if(!b.locked) continue;
+          target=b; break;
+        }
+        if(target){ target.x=mouse.x; target.y=mouse.y; }
+      } else {
+        // stir fluid
+        const dx=mouse.x-ox, dy=mouse.y-oy;
+        addSource(mouse.x,mouse.y, 2.0, dx*0.2, dy*0.2);
+        injectVortex(mouse.x,mouse.y, 24, 0.5);
+      }
+    }
+  });
+  canvas.addEventListener('pointerup', e=>{
+    mouse.down=false;
+    for(const b of bodies){ b.locked=false; }
+  });
+  canvas.addEventListener('wheel', e=>{
+    // adjust mass of nearest body
+    let best=null, bd=1e9;
+    for(const b of bodies){
+      const d=(b.x-e.clientX)**2+(b.y-e.clientY)**2;
+      if(d<bd){bd=d; best=b;}
+    }
+    if(best){
+      best.m = clamp(best.m * (e.deltaY<0 ? 1.08 : 0.925), 10, 1e6);
+      best.r = radiusFromMass(best.m, best.type);
+    }
+    e.preventDefault();
+  }, {passive:false});
+
+  // ======= UI Controls =======
+  function $(id){return document.getElementById(id)}
+  $('g').value = params.G; $('ts').value = params.dtScale; $('vis').value=params.fluid.viscosity; $('dif').value=params.fluid.diffusion;
+  $('acc').checked=params.accretion; $('drag').checked=params.dragOnBodies; $('trails').checked=params.drawTrails; $('labels').checked=params.drawLabels; $('dither').checked=params.dither;
+  $('maxb').value=params.maxBodies;
+  const syncVals=()=>{
+    $('gVal').textContent=params.G.toFixed(3);
+    $('tsVal').textContent=params.dtScale.toFixed(2);
+    $('visVal').textContent=params.fluid.viscosity.toFixed(4);
+    $('difVal').textContent=params.fluid.diffusion.toFixed(4);
+    $('mbVal').textContent=params.maxBodies;
+  }; syncVals();
+
+  $('g').oninput=e=>{ params.G=parseFloat(e.target.value); syncVals(); };
+  $('ts').oninput=e=>{ params.dtScale=parseFloat(e.target.value); syncVals(); };
+  $('vis').oninput=e=>{ params.fluid.viscosity=parseFloat(e.target.value); syncVals(); };
+  $('dif').oninput=e=>{ params.fluid.diffusion=parseFloat(e.target.value); syncVals(); };
+  $('acc').onchange=e=>{ params.accretion=e.target.checked; };
+  $('drag').onchange=e=>{ params.dragOnBodies=e.target.checked; };
+  $('trails').onchange=e=>{ params.drawTrails=e.target.checked; };
+  $('labels').onchange=e=>{ params.drawLabels=e.target.checked; if(!params.drawLabels) hideAllLabels(); };
+  $('dither').onchange=e=>{ params.dither=e.target.checked; };
+  $('maxb').oninput=e=>{ params.maxBodies=parseInt(e.target.value,10); syncVals(); };
+
+  $('addBH').onclick=()=> spawnBH();
+  $('addStar').onclick=()=> spawnStar();
+  $('addPlanet').onclick=()=> spawnPlanet();
+  $('clear').onclick=()=> { bodies.length=0; trails.length=0; for(const n of labelNodes.values()) n.remove(); labelNodes.clear(); };
+  $('reset').onclick=()=> { resize(); };
+  $('addSolar').onclick=()=> spawnSolarSystem();
+
+  function spawnBH(x=rand(W*0.3,W*0.7), y=rand(H*0.3,H*0.7)){
+    if(bodies.length>=params.maxBodies) return;
+    const bh = makeBody(TYPE.BH,{x,y, m: rand(3e4,9e4), vx:0,vy:0});
+    return bh;
+  }
+  function spawnStar(x=rand(W),y=rand(H)){
+    if(bodies.length>=params.maxBodies) return;
+    const s = makeBody(TYPE.STAR,{x,y, m: rand(5e3,1.2e4), vx:rand(-10,10),vy:rand(-10,10)});
+    return s;
+  }
+  function spawnPlanet(around=null){
+    if(bodies.length>=params.maxBodies) return;
+    let x=rand(W),y=rand(H), m=rand(80,1200);
+    if(around){
+      const a=rand(0,TAU), R=rand(60, 240);
+      x=around.x + Math.cos(a)*R; y=around.y + Math.sin(a)*R;
+      const vmag = Math.sqrt(params.G*around.m/Math.max(R,10));
+      const vx = -Math.sin(a)*vmag; const vy = Math.cos(a)*vmag;
+      return makeBody(TYPE.PLANET,{x,y,m, vx:around.vx+vx, vy:around.vy+vy});
+    }
+    return makeBody(TYPE.PLANET,{x,y,m, vx:rand(-30,30), vy:rand(-30,30)});
+  }
+  function spawnSolarSystem(){
+    const cx = rand(W*0.35,W*0.65), cy = rand(H*0.35,H*0.65);
+    const star = makeBody(TYPE.STAR,{x:cx,y:cy,m:rand(9e3,1.5e4),vx:0,vy:0, name: NAME.systems[(Math.random()*NAME.systems.length)|0]+' ☀'});
+    const Np = 7;
+    for(let i=0;i<Np;i++){
+      const a = rand(0,TAU);
+      const R = 60 + i*40 + rand(-10,10);
+      const vmag = Math.sqrt(params.G*star.m/Math.max(R,10));
+      const x = cx + Math.cos(a)*R, y= cy + Math.sin(a)*R;
+      const vx = -Math.sin(a)*vmag, vy = Math.cos(a)*vmag;
+      const p = makeBody(TYPE.PLANET,{x,y, m: rand(90,1200), vx: vx, vy: vy, color: pickColor(TYPE.PLANET), name: randomName(TYPE.PLANET)});
+      // a chance for a mini black hole perturbing system
+      if(Math.random()<0.08) spawnBH(cx+rand(-200,200), cy+rand(-200,200));
+    }
+  }
+
+  // ======= Main Loop =======
+  let last=performance.now(); let fpsAcc=0, fpsCount=0, fps=0;
+  function step(now){
+    const dt = ((now - last)/1000) * params.dtScale;
+    last = now;
+
+    // fluid impulses from bodies (massive ones brighten/stir)
+    for(const b of bodies){
+      addDensity(b.x,b.y, clamp(b.m/12000, 0.3, 2.0));
+      injectVortex(b.x,b.y, 10 + b.r*1.5, (b.type===TYPE.BH?-0.5:0.25));
     }
 
-    function loop(){
-      updatePhysics(); render();
-      requestAnimationFrame(loop);
-    }
-    loop();
+    // fluid sim step
+    vel_step(u,v,u0,v0, params.fluid.viscosity, dt*0.9);
+    dens_step(dens,dens0,u,v, params.fluid.diffusion, dt*0.9);
 
-    // UI
-    function resizeCanvas(){canvas.width=window.innerWidth;canvas.height=window.innerHeight;}
-    document.getElementById("addObject").onclick=()=>{
-      let type=document.getElementById("objectType").value;
-      if(type==="blackhole") objects.push(new Body(canvas.width/2,canvas.height/2,2000,"blackhole"));
-      else if(type==="star") objects.push(new Body(Math.random()*canvas.width,Math.random()*canvas.height,400,"star"));
-      else objects.push(new Body(Math.random()*canvas.width,Math.random()*canvas.height,100,"planet"));
-    };
-    document.getElementById("clear").onclick=()=>{objects=[];particles=[];};
-    document.getElementById("speed").oninput=(e)=>simulationSpeed=parseFloat(e.target.value);
-  </script>
+    // gravity step
+    gravityStep(dt);
+
+    // draw
+    ctx.clearRect(0,0,W,H);
+    drawFluid();
+    drawBodies(dt);
+    drawBackground();
+
+    // FPS
+    fpsAcc+=dt; fpsCount++;
+    if(fpsAcc>=0.5){ fps = (fpsCount/fpsAcc)|0; fpsAcc=0; fpsCount=0; $('fps').textContent=`FPS: ${fps} • Bodies: ${bodies.length}`; }
+
+    requestAnimationFrame(step);
+  }
+
+  // ======= Bootstrap =======
+  resize(); fluidAlloc();
+  // default scene
+  spawnSolarSystem();
+  spawnBH(W*0.75, H*0.45);
+
+  requestAnimationFrame(step);
+
+})();
+</script>
 </body>
 </html>
