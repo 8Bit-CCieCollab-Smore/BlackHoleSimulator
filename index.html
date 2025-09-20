@@ -2,1008 +2,169 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Black Hole Sandbox (Canvas)</title>
+  <title>2D Black Hole Simulator</title>
   <style>
-    :root { color-scheme: dark; }
-    body { margin: 0; background:#000; overflow: hidden; font-family: system-ui, Arial, sans-serif; }
-    #overlay {
-      position: absolute; top: 12px; left: 12px; width: 340px;
-      background: rgba(255,255,255,0.95); color:#111; padding:12px 14px;
-      border-radius: 12px; box-shadow: 0 6px 24px rgba(0,0,0,0.35); font-size:14px; z-index:10;
-      max-height:95vh; overflow-y:auto;
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #444;
+      color: white;
+      font-family: sans-serif;
     }
-    #overlay h3 { margin:0 0 8px 0; font-size:16px; }
-    #overlay .row { display:flex; gap:8px; margin:6px 0; }
-    #overlay button {
-      flex:1; background:#111; color:#fff; border:0; border-radius:8px; padding:8px 10px; cursor:pointer;
+    #ui {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.6);
+      padding: 10px;
+      border-radius: 8px;
     }
-    #overlay button:hover { background:#333; }
-    #overlay label { display:block; margin:6px 0; }
-    #overlay input[type="range"] { width:100%; }
-    #overlay .muted { color:#444; font-size:12px; }
-    #overlay .group { margin-top:10px; padding-top:8px; border-top:1px solid #ddd; }
-    #overlay .list { margin-top:6px; background:#f8f8f8; border-radius:8px; padding:6px; }
-    #overlay .list h4 { margin:6px 0 4px; font-size:13px; color:#333; }
-    #overlay .item { padding:6px 8px; border-radius:6px; margin:3px 0; cursor:pointer; }
-    #overlay .item:hover { background:#e8e8e8; }
-    #hint {
-      position:absolute; right:12px; top:12px; color:#bbb; font-size:12px;
-      background: rgba(255,255,255,0.1); padding:8px 10px; border-radius:10px; pointer-events:none;
+    #ui button, #ui select, #ui input {
+      margin: 4px;
     }
-    canvas { display:block; }
-    #selectedInfo { margin-top:6px; padding:8px; border-radius:8px; background:#f3f3f3; }
-    #selectedInfo b { color:#000; }
-    .disabled { opacity: .5; pointer-events: none; }
-    .inline-row { display:flex; align-items:center; gap:8px; }
-    .inline-row > * { flex:1; }
+    canvas {
+      display: block;
+    }
   </style>
 </head>
 <body>
-  <div id="overlay">
-    <h3>🌌 Black Hole Sandbox</h3>
-
-    <div id="selectedInfo">
-      Selected: <b id="selLabel">None</b>
-    </div>
-
-    <div class="row">
-      <button id="addPlanetBtn">➕ Planet</button>
-      <button id="addBHBtn">🕳️ Black Hole</button>
-      <button id="addSunBtn">☀️ Sun</button>
-    </div>
-
-    <div id="bhControls" class="disabled">
-      <label>Mass <input id="massSlider" type="range" min="2000" max="60000" step="500" value="9000"></label>
-      <label>Radius <input id="radiusSlider" type="range" min="20" max="160" step="2" value="60"></label>
-    </div>
-
-    <div class="group">
-      <div class="inline-row">
-        <button id="pauseBtn">⏯ Pause</button>
-        <button id="stepBtn" disabled>⏭ Step</button>
-      </div>
-      <label>Speed
-        <input id="speedSlider" type="range" min="0.1" max="5" step="0.1" value="1">
-      </label>
-    </div>
-
-    <div class="group">
-      <label>Realism (Inspiral drag)
-        <input id="realismSlider" type="range" min="0" max="100" step="1" value="35">
-      </label>
-      <label>Stars: <span id="starCountLabel">2200</span>
-        <input id="starCountSlider" type="range" min="500" max="5000" step="100" value="2200">
-      </label>
-      <label class="inline-row">
-        <span>Nebulae</span>
-        <input id="nebulaChk" type="checkbox">
-      </label>
-      <label class="inline-row">
-        <span>Supernova on Merge</span>
-        <input id="supernovaChk" type="checkbox" checked>
-      </label>
-    </div>
-
-    <div class="group list" id="objectList">
-      <h4>Objects</h4>
-      <div id="bhList"></div>
-      <div id="sunList"></div>
-      <div id="planetStats" class="muted"></div>
-    </div>
-
-    <div class="muted" style="margin-top:8px;">
-      • Drag to pan • Wheel to zoom • Double-click to center<br>
-      • Click BH/Sun to edit or follow • Click planet for POV<br>
-      • Stars lens near BHs • Suns spaghettify into glowing jets
-    </div>
+  <canvas id="sim"></canvas>
+  <div id="ui">
+    <select id="objectType">
+      <option value="blackhole">Black Hole</option>
+      <option value="star">Star</option>
+      <option value="planet">Planet</option>
+    </select>
+    <button id="addObject">Add</button>
+    <button id="clear">Clear</button>
+    <label>
+      Speed:
+      <input type="range" id="speed" min="0.1" max="3" step="0.1" value="1">
+    </label>
   </div>
-
-  <div id="hint">drag = pan • wheel = zoom • double-click = center</div>
-
-  <canvas id="c"></canvas>
-
   <script>
-  // ===== Constants & Helpers =====
-  const TAU = Math.PI*2;
-  const randIndex = n => (Math.random()*n) | 0;
-  const pick = arr => arr[randIndex(arr.length)];
-  const clamp = (v,min,max)=> Math.max(min, Math.min(max, v));
-  const lerp = (a,b,t)=> a + (b-a)*t;
+    const canvas = document.getElementById("sim");
+    const ctx = canvas.getContext("2d");
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
 
-  // ===== Canvas & Camera =====
-  const cv = document.getElementById('c');
-  const ctx = cv.getContext('2d');
-  const DPR = Math.min(2, window.devicePixelRatio || 1);
+    let objects = [];
+    let simulationSpeed = 1;
 
-  const cam = { x: 0, y: 0, s: 1.0, minS: 0.3, maxS: 3.0, follow:null };
-
-  function resize() {
-    cv.width = Math.floor(window.innerWidth * DPR);
-    cv.height = Math.floor(window.innerHeight * DPR);
-    cv.style.width = window.innerWidth + 'px';
-    cv.style.height = window.innerHeight + 'px';
-    ctx.setTransform(1,0,0,1,0,0);
-    ctx.scale(DPR, DPR);
-  }
-  window.addEventListener('resize', resize);
-  resize();
-
-  function worldToScreen(wx, wy) {
-    const sx = (wx - cam.x) * cam.s + window.innerWidth/2;
-    const sy = (wy - cam.y) * cam.s + window.innerHeight/2;
-    return {x:sx, y:sy};
-  }
-  function screenToWorld(sx, sy) {
-    const wx = (sx - window.innerWidth/2)/cam.s + cam.x;
-    const wy = (sy - window.innerHeight/2)/cam.s + cam.y;
-    return {x:wx, y:wy};
-  }
-
-  // ===== Input (pan/zoom + selection) =====
-  let dragging = false;
-  let lastMouse = {x:0,y:0};
-
-  cv.addEventListener('mousedown', e=>{
-    dragging = true; lastMouse.x = e.clientX; lastMouse.y = e.clientY;
-  });
-  window.addEventListener('mouseup', ()=> dragging=false);
-  window.addEventListener('mousemove', e=>{
-    if (!dragging || cam.follow) return; // in POV, disable manual pan
-    const dx = (e.clientX - lastMouse.x) / cam.s;
-    const dy = (e.clientY - lastMouse.y) / cam.s;
-    cam.x -= dx;
-    cam.y -= dy;
-    lastMouse.x = e.clientX; lastMouse.y = e.clientY;
-  });
-
-  cv.addEventListener('wheel', e=>{
-    e.preventDefault();
-    const mouseWorld = screenToWorld(e.clientX, e.clientY);
-    const zoomFactor = Math.exp(-e.deltaY * 0.0015);
-    const newS = clamp(cam.s * zoomFactor, cam.minS, cam.maxS);
-    const scale = newS / cam.s;
-    cam.x = mouseWorld.x - (mouseWorld.x - cam.x) * scale;
-    cam.y = mouseWorld.y - (mouseWorld.y - cam.y) * scale;
-    cam.s = newS;
-  }, {passive:false});
-
-  cv.addEventListener('dblclick', e=>{
-    const w = screenToWorld(e.clientX, e.clientY);
-    cam.x = w.x; cam.y = w.y;
-  });
-
-  // Click to select BH / Sun / Planet / empty
-  cv.addEventListener('click', e=>{
-    const w = screenToWorld(e.clientX, e.clientY);
-    // hit BH first
-    let hitBH = null;
-    for (const b of blackHoles){
-      const d = Math.hypot(b.x - w.x, b.y - w.y);
-      if (d <= Math.max(18, b.radius*1.2)) { hitBH = b; break; }
-    }
-    if (hitBH){ selectBH(hitBH); return; }
-    // hit Sun
-    let hitS = null;
-    for (const s of suns){
-      const d = Math.hypot(s.x - w.x, s.y - w.y);
-      if (d <= Math.max(12, s.radius*1.4)) { hitS = s; break; }
-    }
-    if (hitS){ selectSunPOV(hitS); return; }
-    // hit planet
-    let hitP = null;
-    for (const p of planets){
-      const d = Math.hypot(p.x - w.x, p.y - w.y);
-      if (d <= Math.max(10, p.r*1.4)) { hitP = p; break; }
-    }
-    if (hitP){ selectPlanetPOV(hitP); return; }
-    clearSelection();
-  });
-
-  // ===== World State =====
-  let stars = [];
-  let targetStarCount = 2200;
-  const STAR_COLS = ['#fff','#ffd27f','#87cefa','#ffaaa5'];
-
-  function seedStars(n){
-    const arr = [];
-    for (let i=0;i<n;i++){
-      arr.push({
-        x: (Math.random()-0.5)*9000,
-        y: (Math.random()-0.5)*9000,
-        c: pick(STAR_COLS),
-        s: Math.random()*1.5+0.5
-      });
-    }
-    stars = arr;
-  }
-  seedStars(targetStarCount);
-
-  const nebulae = [];
-  let nebulaEnabled = false;
-  function seedNebulae(){
-    nebulae.length = 0;
-    const colors = [
-      ['rgba(120,180,255,0.25)','rgba(120,180,255,0)'],
-      ['rgba(200,120,255,0.22)','rgba(200,120,255,0)'],
-      ['rgba(120,255,200,0.20)','rgba(120,255,200,0)']
-    ];
-    for (let i=0;i<3;i++){
-      nebulae.push({
-        x:(Math.random()-0.5)*6000,
-        y:(Math.random()-0.5)*6000,
-        r: 1200 + Math.random()*800,
-        dx: (Math.random()-0.5)*0.3,
-        dy: (Math.random()-0.5)*0.3,
-        c1: colors[i][0], c2: colors[i][1]
-      });
-    }
-  }
-
-  const planets = []; // {x,y,vx,vy,r,color,trail[],alive}
-  const frags   = []; // {x,y,vx,vy,r,color,trail[],fade}
-  const sparks  = []; // {x,y,vx,vy,life,max, color}
-  const blackHoles = []; // {x,y,vx,vy,mass,radius,diskColors[],diskRot,waveT,mergeFlashT,timeClose}
-  const suns = []; // {x,y,vx,vy,radius,mass,color,particles[]}
-
-  const settings = {
-    defaultBHMass: 9000, defaultBHRadius: 60, supernova: true,
-    realism: 0.035, // slider will map 0..100 → 0..0.10
-    speed: 1.0,
-    paused: false, stepOnce: false
-  };
-
-  // Initial BH at origin
-  addBlackHoleAt(0,0);
-
-  // Selection state
-  let selectedBH = null;     // active BH for controls
-  let planetPOV  = null;     // planet object to follow
-  let sunPOV     = null;     // sun object to follow
-
-  const selLabel = document.getElementById('selLabel');
-  const bhControls = document.getElementById('bhControls');
-  const massSlider = document.getElementById('massSlider');
-  const radiusSlider = document.getElementById('radiusSlider');
-
-  function selectBH(b){
-    selectedBH = b; planetPOV = null; sunPOV = null; cam.follow = null;
-    selLabel.textContent = 'Black Hole';
-    bhControls.classList.remove('disabled');
-    massSlider.value = Math.round(b.mass);
-    radiusSlider.value = Math.round(b.radius);
-  }
-  function selectPlanetPOV(p){
-    planetPOV = p; sunPOV = null; cam.follow = p; selectedBH = null;
-    selLabel.textContent = 'POV: Planet';
-    bhControls.classList.add('disabled');
-  }
-  function selectSunPOV(s){
-    sunPOV = s; planetPOV = null; cam.follow = s; selectedBH = null;
-    selLabel.textContent = 'POV: Sun';
-    bhControls.classList.add('disabled');
-  }
-  function clearSelection(){
-    selectedBH = null; planetPOV = null; sunPOV = null; cam.follow = null;
-    selLabel.textContent = 'None';
-    bhControls.classList.add('disabled');
-  }
-
-  // ===== UI bindings =====
-  document.getElementById('supernovaChk').addEventListener('change', e=>{
-    settings.supernova = e.target.checked;
-  });
-  document.getElementById('nebulaChk').addEventListener('change', e=>{
-    nebulaEnabled = e.target.checked;
-    if (nebulaEnabled && nebulae.length===0) seedNebulae();
-  });
-  const starCountSlider = document.getElementById('starCountSlider');
-  const starCountLabel  = document.getElementById('starCountLabel');
-  starCountSlider.addEventListener('input', e=>{
-    targetStarCount = +e.target.value;
-    starCountLabel.textContent = targetStarCount;
-    seedStars(targetStarCount);
-  });
-
-  document.getElementById('addPlanetBtn').addEventListener('click', addPlanet);
-  document.getElementById('addBHBtn').addEventListener('click', ()=>{
-    const center = screenToWorld(window.innerWidth/2, window.innerHeight/2);
-    addBlackHoleAt(center.x + (Math.random()-0.5)*200/cam.s,
-                   center.y + (Math.random()-0.5)*200/cam.s,
-                   /*tryOrbit=*/true);
-    refreshObjectList();
-  });
-  document.getElementById('addSunBtn').addEventListener('click', ()=>{
-    const center = screenToWorld(window.innerWidth/2, window.innerHeight/2);
-    addSun(center.x + (Math.random()-0.5)*250/cam.s,
-           center.y + (Math.random()-0.5)*250/cam.s);
-    refreshObjectList();
-  });
-
-  massSlider.addEventListener('input', e=>{
-    if (selectedBH){ selectedBH.mass = +e.target.value; }
-  });
-  radiusSlider.addEventListener('input', e=>{
-    if (selectedBH){ selectedBH.radius = +e.target.value; }
-  });
-  document.getElementById('realismSlider').addEventListener('input', e=>{
-    const val = +e.target.value; // 0..100
-    settings.realism = val/1000; // 0.00 → 0.10 (more visible)
-  });
-
-  const pauseBtn = document.getElementById('pauseBtn');
-  const stepBtn  = document.getElementById('stepBtn');
-  const speedSlider = document.getElementById('speedSlider');
-  pauseBtn.addEventListener('click', ()=>{
-    settings.paused = !settings.paused;
-    pauseBtn.textContent = settings.paused ? '▶️ Resume' : '⏯ Pause';
-    stepBtn.disabled = !settings.paused;
-  });
-  stepBtn.addEventListener('click', ()=>{
-    if (settings.paused){
-      settings.stepOnce = true;
-    }
-  });
-  speedSlider.addEventListener('input', e=>{
-    settings.speed = +e.target.value;
-  });
-
-  // ===== Spawners =====
-  const PLANET_COLS = ['#4cc9f0','#ff006e','#8338ec','#06d6a0','#ffd166'];
-
-  function addPlanet() {
-    const bh = blackHoles.length ? blackHoles[(Math.random()*blackHoles.length)|0] : {x:cam.x,y:cam.y,mass:4000};
-    const dist = Math.random()*350 + 120;
-    const ang = Math.random()*Math.PI*2;
-    const x = bh.x + dist*Math.cos(ang);
-    const y = bh.y + dist*Math.sin(ang);
-
-    const Gspeed = Math.sqrt(totalBHMassNear(x,y) / dist) * (0.7 + Math.random()*0.6);
-    const vx = -Math.sin(ang)*Gspeed;
-    const vy =  Math.cos(ang)*Gspeed;
-
-    planets.push({
-      x, y, vx, vy,
-      r: Math.random()*6 + 8,
-      color: pick(PLANET_COLS),
-      trail: [],
-      alive: true
-    });
-    refreshObjectList();
-  }
-
-  function addBlackHoleAt(x,y, tryOrbit=false) {
-    const b = {
-      x, y, vx:0, vy:0,
-      mass: settings.defaultBHMass,
-      radius: settings.defaultBHRadius,
-      diskColors: [], // newest first (inner ring)
-      diskRot: 0,
-      waveT: 0,
-      mergeFlashT: 0, // seconds remaining for supernova glow
-      timeClose: 0 // time spent within strong interaction range with a neighbor
-    };
-
-    if (tryOrbit && blackHoles.length){
-      let nearest = null, nd=Infinity;
-      for (const o of blackHoles){
-        const d = Math.hypot(o.x - x, o.y - y);
-        if (d < nd){ nd = d; nearest = o; }
+    class Body {
+      constructor(x, y, mass, type) {
+        this.x = x;
+        this.y = y;
+        this.vx = (Math.random() - 0.5) * 0.5;
+        this.vy = (Math.random() - 0.5) * 0.5;
+        this.mass = mass;
+        this.type = type;
+        this.radius = Math.cbrt(mass) * 2;
       }
-      if (nearest && nd > 1){
-        const totalM = b.mass + nearest.mass;
-        const r = nd;
-        const v = Math.sqrt(totalM / r);
-        const dx = x - nearest.x, dy = y - nearest.y;
-        const len = Math.hypot(dx,dy) || 1;
-        const ux = -dy/len, uy = dx/len;
-        b.vx = ux * v * 0.9;
-        b.vy = uy * v * 0.9;
-      }
-    }
-
-    blackHoles.push(b);
-  }
-
-  function addSun(x,y){
-    const radius = (Math.random()*0.3+0.6)*settings.defaultBHRadius; // 60–90% of BH size
-    const mass = Math.random()*settings.defaultBHMass*0.3;           // up to 30% of BH mass
-    suns.push({
-      x,y,
-      vx:(Math.random()-0.5)*1,vy:(Math.random()-0.5)*1,
-      radius,mass,color:'#ffb200',
-      particles:[] // {x,y,vx,vy,color,fade,glow}
-    });
-  }
-
-  function totalBHMassNear(x,y){
-    let m = 0;
-    for (const bh of blackHoles){
-      const dx = bh.x - x, dy = bh.y - y;
-      const d = Math.hypot(dx,dy) + 1;
-      m += bh.mass / Math.max(1, d/200);
-    }
-    return m;
-  }
-
-  // ===== Physics =====
-  function update(dt){
-    if (settings.paused && !settings.stepOnce) return;
-    if (settings.paused && settings.stepOnce) { /* allow single step */ settings.stepOnce = false; }
-
-    dt *= settings.speed;
-
-    // Smooth follow for POV
-    if (cam.follow){
-      cam.x = lerp(cam.x, cam.follow.x, 0.15);
-      cam.y = lerp(cam.y, cam.follow.y, 0.15);
-    }
-
-    // --- Suns (orbit + multi-point spaghettification) ---
-    for (let i=suns.length-1;i>=0;i--){
-      const s=suns[i];
-      let ax=0, ay=0;
-      let nearestBH = null; let nearestD = Infinity;
-
-      // Gravity from BHs
-      for (const b of blackHoles){
-        const dx = b.x - s.x, dy = b.y - s.y;
-        const r2 = dx*dx + dy*dy + 0.001;
-        const d = Math.sqrt(r2);
-        if (d < nearestD){ nearestD = d; nearestBH = b; }
-        const F = b.mass / r2;
-        ax += F * dx / d;
-        ay += F * dy / d;
-      }
-
-      // Move sun
-      s.vx += ax*dt; s.vy += ay*dt;
-      s.x  += s.vx*dt; s.y  += s.vy*dt;
-
-      // Spaghettify near nearest BH (multi-point emission on the facing hemisphere)
-      if (nearestBH && nearestD < nearestBH.radius*3){
-        const dx = nearestBH.x - s.x, dy = nearestBH.y - s.y;
-        const baseAng = Math.atan2(dy,dx);
-        const exits = [0, 0.3, -0.3, 0.6, -0.6];
-        for (let k=0;k<exits.length;k++){
-          if (Math.random() < 0.24){
-            const ang = baseAng + exits[k];
-            const ux = Math.cos(ang), uy = Math.sin(ang);
-            const speedOut = 2.8 + Math.random()*1.8;
-            s.particles.push({
-              x: s.x + ux*s.radius, y: s.y + uy*s.radius,
-              vx: ux*speedOut, vy: uy*speedOut,
-              color: s.color, fade: 1.0, glow: 1.0
-            });
-          }
-        }
-      }
-
-      // Consumed by BH
-      if (nearestBH && nearestD <= nearestBH.radius){
-        nearestBH.diskColors.unshift(s.color);
-        if (nearestBH.diskColors.length > 8) nearestBH.diskColors = nearestBH.diskColors.slice(0,8);
-        suns.splice(i,1);
-        if (sunPOV === s) clearSelection();
-        // Spark burst on sun swallow
-        spawnSparks(s.x, s.y, s.color, 24, 1.0);
-        continue;
-      }
-
-      // Update shed particles (faster infall; eaten at 2x radius, ×5 pull)
-      for (let j=s.particles.length-1;j>=0;j--){
-        const p = s.particles[j];
-        if (nearestBH){
-          const dx = nearestBH.x - p.x, dy = nearestBH.y - p.y;
-          const r2 = dx*dx + dy*dy + 0.001;
-          const d = Math.sqrt(r2);
-          const F = (nearestBH.mass / r2) * 5.0; // ×5 stronger pull to outrun sun
-          const axp = F * dx / d;
-          const ayp = F * dy / d;
-          p.vx += axp*dt; p.vy += ayp*dt;
-          if (d <= nearestBH.radius*2){
-            nearestBH.diskColors.unshift(s.color);
-            if (nearestBH.diskColors.length > 8) nearestBH.diskColors = nearestBH.diskColors.slice(0,8);
-            s.particles.splice(j,1);
-            continue;
-          }
-        }
-        p.x += p.vx*dt; p.y += p.vy*dt;
-        p.fade -= 0.004*dt;
-        p.glow = Math.max(0, p.glow - 0.005*dt);
-        if (p.fade <= 0) s.particles.splice(j,1);
-      }
-    }
-
-    // --- Planets ---
-    for (let i=planets.length-1; i>=0; i--){
-      const p = planets[i];
-      let ax=0, ay=0;
-      let nearestBH = null; let nearestD = Infinity;
-
-      for (const b of blackHoles){
-        const dx = b.x - p.x, dy = b.y - p.y;
-        const r2 = dx*dx + dy*dy + 0.001;
-        const d = Math.sqrt(r2);
-        if (d < nearestD){ nearestD = d; nearestBH = b; }
-
-        const F = b.mass / r2;
-        ax += F * dx / d;
-        ay += F * dy / d;
-      }
-
-      p.vx += ax*dt; p.vy += ay*dt;
-      p.x  += p.vx*dt; p.y  += p.vy*dt;
-
-      // Tidal breakup
-      if (nearestBH && nearestD < nearestBH.radius*2 && p.alive){
-        planets.splice(i,1);
-        const pieces = 10;
-        for (let k=0;k<pieces;k++){
-          const jitter = 0.6 + Math.random()*0.8;
-          const frag = {
-            x:p.x, y:p.y,
-            vx:p.vx*jitter, vy:p.vy*jitter,
-            r:Math.max(2, p.r/3),
-            color:p.color,
-            trail:[],
-            fade:1
-          };
-          frags.push(frag);
-        }
-        // sparks on breakup
-        spawnSparks(p.x, p.y, p.color, 18, 0.8);
-        if (planetPOV === p){ clearSelection(); }
-        continue;
-      }
-
-      // Consumption
-      let consumed = false;
-      for (const b of blackHoles){
-        if (Math.hypot(b.x-p.x, b.y-p.y) <= b.radius){
-          b.diskColors.unshift(p.color);
-          if (b.diskColors.length > 8) b.diskColors = b.diskColors.slice(0,8);
-          planets.splice(i,1);
-          if (planetPOV === p){ clearSelection(); }
-          // small sparks on swallow
-          spawnSparks(p.x, p.y, p.color, 10, 0.5);
-          consumed = true;
-          break;
-        }
-      }
-      if (consumed) continue;
-
-      p.trail.push({x:p.x, y:p.y});
-      if (p.trail.length > 36) p.trail.shift();
-    }
-
-    // --- Fragments ---
-    for (let i=frags.length-1; i>=0; i--){
-      const f = frags[i];
-      let ax=0, ay=0;
-      let hitBH = null;
-      for (const b of blackHoles){
-        const dx = b.x - f.x, dy = b.y - f.y;
-        const r2 = dx*dx + dy*dy + 0.001;
-        const d = Math.sqrt(r2);
-        const F = b.mass / r2;
-        ax += F * dx / d;
-        ay += F * dy / d;
-        if (d <= b.radius) hitBH = b;
-      }
-      f.vx += ax*dt; f.vy += ay*dt;
-      f.x  += f.vx*dt; f.y  += f.vy*dt;
-
-      if (hitBH){
-        hitBH.diskColors.unshift(f.color);
-        if (hitBH.diskColors.length > 8) hitBH.diskColors = hitBH.diskColors.slice(0,8);
-        frags.splice(i,1);
-        // tiny sparks on fragment swallow
-        spawnSparks(f.x, f.y, f.color, 6, 0.4);
-        continue;
-      }
-
-      f.trail.push({x:f.x, y:f.y});
-      if (f.trail.length > 22) f.trail.shift();
-      if (f.fade > 0.2) f.fade -= 0.001*dt;
-    }
-
-    // --- Sparks ---
-    for (let i=sparks.length-1;i>=0;i--){
-      const s = sparks[i];
-      s.life -= dt;
-      s.x += s.vx*dt; s.y += s.vy*dt;
-      if (s.life <= 0) sparks.splice(i,1);
-    }
-
-    // --- BH–BH gravity with inspiral (drag scales with "Realism") ---
-    for (let i=0;i<blackHoles.length;i++){
-      const A = blackHoles[i];
-      for (let j=i+1;j<blackHoles.length;j++){
-        const B = blackHoles[j];
-        const dx = B.x - A.x, dy = B.y - A.y;
-        const d2 = dx*dx + dy*dy + 0.001;
-        const d  = Math.sqrt(d2);
-
-        // Newtonian acceleration
-        const F  = (A.mass * B.mass) / d2;
-        const ax =  F * dx / d / A.mass;
-        const ay =  F * dy / d / A.mass;
-        const bx = -F * dx / d / B.mass;
-        const by = -F * dy / d / B.mass;
-
-        A.vx += ax*dt; A.vy += ay*dt;
-        B.vx += bx*dt; B.vy += by*dt;
-
-        // Inspiral drag (visible): ~ realism / r^5
-        const drag = settings.realism / (d2*d2*d + 1e-6);
-        const Av = Math.hypot(A.vx, A.vy) + 1e-6;
-        const Bv = Math.hypot(B.vx, B.vy) + 1e-6;
-        A.vx -= A.vx/Av * drag * dt * A.mass;
-        A.vy -= A.vy/Av * drag * dt * A.mass;
-        B.vx -= B.vx/Bv * drag * dt * B.mass;
-        B.vy -= B.vy/Bv * drag * dt * B.mass;
-
-        // Orbit a bit before merging
-        const closeThresh = (A.radius + B.radius)*3;
-        if (d < closeThresh){
-          A.timeClose += dt; B.timeClose += dt;
-        }
-
-        // Merge when touching and close for a while
-        if (d <= (A.radius + B.radius)*0.9 && (A.timeClose > 0.6 || B.timeClose > 0.6)){
-          const big = (A.mass >= B.mass) ? A : B;
-          const small = (A.mass < B.mass) ? A : B;
-
-          big.vx = (big.vx*big.mass + small.vx*small.mass)/(big.mass+small.mass);
-          big.vy = (big.vy*big.mass + small.vy*small.mass)/(big.mass+small.mass);
-          big.mass += small.mass;
-          big.radius = Math.min(160, Math.sqrt(big.radius*big.radius + small.radius*small.radius));
-          big.diskColors = small.diskColors.concat(big.diskColors).slice(0,8);
-          big.timeClose = 0;
-          if (settings.supernova) big.mergeFlashT = 5.0; // 5s supernova
-
-          const idx = blackHoles.indexOf(small);
-          blackHoles.splice(idx,1);
-          if (selectedBH === small) clearSelection();
-          i = 0; break;
+      draw() {
+        if (this.type === "blackhole") {
+          ctx.beginPath();
+          ctx.fillStyle = "black";
+          ctx.arc(this.x, this.y, this.radius, 0, 2 * Math.PI);
+          ctx.fill();
+          // gravitational lensing grid distortion
+          drawDistortion(this.x, this.y, this.radius * 4);
+        } else if (this.type === "star") {
+          ctx.beginPath();
+          ctx.fillStyle = "yellow";
+          ctx.shadowBlur = 20;
+          ctx.shadowColor = "yellow";
+          ctx.arc(this.x, this.y, this.radius, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        } else {
+          ctx.beginPath();
+          ctx.fillStyle = "lightblue";
+          ctx.arc(this.x, this.y, this.radius, 0, 2 * Math.PI);
+          ctx.fill();
         }
       }
     }
 
-    // Integrate BH positions & decay timers
-    for (const b of blackHoles){
-      b.x += b.vx*dt; b.y += b.vy*dt;
-      b.vx *= 0.999; b.vy *= 0.999; // mild damping for stability
-      if (b.mergeFlashT > 0) b.mergeFlashT = Math.max(0, b.mergeFlashT - dt);
-    }
-  }
-
-  function spawnSparks(x,y,color,count=12, power=0.6){
-    for (let i=0;i<count;i++){
-      const ang = Math.random()*TAU;
-      const spd = (0.5 + Math.random()*1.5) * power * 50;
-      sparks.push({
-        x, y,
-        vx: Math.cos(ang)*spd, vy: Math.sin(ang)*spd,
-        life: 0.5 + Math.random()*0.5,
-        max: 1.0,
-        color
-      });
-    }
-  }
-    
-    // Nebulae
-    if (nebulaEnabled){
-      for (const n of nebulae){
-        n.x += n.dx; n.y += n.dy;
-        const c = worldToScreen(n.x, n.y);
-        const R = n.r*cam.s;
-        const g = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, R);
-        g.addColorStop(0, n.c1);
-        g.addColorStop(1, n.c2);
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.fillStyle = g;
-        ctx.beginPath(); ctx.arc(c.x, c.y, R, 0, TAU); ctx.fill();
-        ctx.restore();
-      }
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
     }
 
-    // Stars with lensing
-    drawStarsWithLensing();
-
-    // Suns (bright glow) + particles
-    for (const s of suns){
-      const c = worldToScreen(s.x, s.y);
-      // body glow
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.shadowBlur = 50;
-      ctx.shadowColor = 'rgba(255,200,80,1)';
-      const body = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, s.radius*cam.s*2.2);
-      body.addColorStop(0, 'rgba(255,230,120,0.95)');
-      body.addColorStop(0.5, 'rgba(255,200,60,0.6)');
-      body.addColorStop(1, 'rgba(255,160,0,0)');
-      ctx.fillStyle = body;
-      ctx.beginPath(); ctx.arc(c.x, c.y, Math.max(2, s.radius*cam.s), 0, TAU); ctx.fill();
-      ctx.restore();
-
-      // particles (glowing)
-      for (const p of s.particles){
-        const ps = worldToScreen(p.x,p.y);
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.shadowBlur = 30 * (p.glow+0.5);
-        ctx.shadowColor = 'rgba(255,200,100,1)';
-        ctx.fillStyle = 'rgba(255,200,100,0.9)';
-        ctx.beginPath(); ctx.arc(ps.x, ps.y, 2.2, 0, TAU); ctx.fill();
-        ctx.restore();
-      }
-    }
-
-    // Trails (gradient fade)
-    const drawTrail = (trail, color, baseAlpha)=>{
-      if (trail.length<2) return;
-      for (let i=1;i<trail.length;i++){
-        const a = trail[i-1], b = trail[i];
-        const p1 = worldToScreen(a.x, a.y);
-        const p2 = worldToScreen(b.x, b.y);
-        const t = i / trail.length;
-        ctx.strokeStyle = color;
-        ctx.globalAlpha = baseAlpha * (i / trail.length);
+    function drawGrid() {
+      ctx.strokeStyle = "rgba(200,200,200,0.2)";
+      ctx.lineWidth = 1;
+      let step = 50;
+      for (let x = 0; x < canvas.width; x += step) {
         ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
         ctx.stroke();
       }
-      ctx.globalAlpha = 1;
-    };
-    for (const p of planets) drawTrail(p.trail, p.color, 0.9);
-    for (const f of frags)   drawTrail(f.trail, f.color, 0.5);
-
-    // Accretion Disks
-    for (const b of blackHoles) drawAccretionDisk(b);
-
-    // BH cores + supernova + selection highlight
-    for (const b of blackHoles){
-      const c = worldToScreen(b.x, b.y);
-
-      // selection ring if selected
-      if (selectedBH === b){
-        ctx.globalAlpha = 0.9;
-        ctx.strokeStyle = '#00e5ff';
-        ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(c.x, c.y, (b.radius+8)*cam.s, 0, TAU); ctx.stroke();
-        ctx.globalAlpha = 1;
-      }
-
-      // Core
-      ctx.shadowBlur = 0;
-      ctx.beginPath();
-      ctx.arc(c.x, c.y, b.radius*cam.s, 0, TAU);
-      ctx.fillStyle = '#000';
-      ctx.fill();
-
-      // 5s Supernova flash with expanding glow
-      if (b.mergeFlashT>0){
-        const t = 1 - (b.mergeFlashT/5); // 0 → 1 over 5s
-        const ease = t*t*(3-2*t); // smoothstep
-        const R = (b.radius*8 + 220*ease) * cam.s; // expanding radius
-        const alpha = Math.max(0, 0.9 - t*0.9);     // fade out
-        const g = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, R);
-        g.addColorStop(0, `rgba(255,255,255,${0.7*alpha})`);
-        g.addColorStop(0.4, `rgba(255,230,180,${0.5*alpha})`);
-        g.addColorStop(1, 'rgba(255,200,120,0)');
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.fillStyle = g;
-        ctx.beginPath(); ctx.arc(c.x, c.y, R, 0, TAU); ctx.fill();
-        ctx.restore();
+      for (let y = 0; y < canvas.height; y += step) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
       }
     }
 
-    // Planets
-    for (const p of planets){
-      const s = worldToScreen(p.x, p.y);
-      if (planetPOV === p){
-        ctx.strokeStyle = '#fff';
-        ctx.globalAlpha = 0.8;
-        ctx.beginPath(); ctx.arc(s.x, s.y, Math.max(8, p.r*cam.s + 6), 0, TAU); ctx.stroke();
-        ctx.globalAlpha = 1;
-      }
+    function drawDistortion(cx, cy, radius) {
+      ctx.strokeStyle = "rgba(255,255,255,0.15)";
       ctx.beginPath();
-      ctx.arc(s.x, s.y, Math.max(1.5, p.r*cam.s), 0, TAU);
-      ctx.fillStyle = p.color;
-      ctx.fill();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.stroke();
     }
 
-    // fragments
-    for (const f of frags){
-      const s = worldToScreen(f.x, f.y);
-      ctx.globalAlpha = Math.max(0, Math.min(1, f.fade));
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, Math.max(1, f.r*cam.s), 0, TAU);
-      ctx.fillStyle = f.color;
-      ctx.fill();
-      ctx.globalAlpha = 1;
-    }
-
-   // sparks (simplified, no glow)
-for (const sp of sparks){
-  const s = worldToScreen(sp.x, sp.y);
-  const a = Math.max(0, sp.life / sp.max);
-  ctx.globalAlpha = a;
-  ctx.fillStyle = "white";
-  ctx.beginPath();
-  ctx.arc(s.x, s.y, 2.0, 0, TAU);
-  ctx.fill();
-}
-ctx.globalAlpha = 1;
-    // Object list refresh (lightweight each frame)
-    drawObjectList();
-  }
-
-  function drawStarsWithLensing(){
-    for (const s of stars){
-      let sx = (s.x - cam.x)*cam.s + window.innerWidth/2;
-      let sy = (s.y - cam.y)*cam.s + window.innerHeight/2;
-
-      // Apply simple lensing from each BH (screen-space radial offset)
-      for (const b of blackHoles){
-        const dx = s.x - b.x;
-        const dy = s.y - b.y;
-        const dist = Math.hypot(dx,dy);
-        if (dist < b.radius*15){
-          const factor = (b.radius*1.5)/(dist+1); // stronger near the core
-          sx += (dx/dist) * factor * cam.s * 15;
-          sy += (dy/dist) * factor * cam.s * 15;
+    function updatePhysics() {
+      const G = 0.1;
+      for (let i = 0; i < objects.length; i++) {
+        let a = objects[i];
+        for (let j = i + 1; j < objects.length; j++) {
+          let b = objects[j];
+          let dx = b.x - a.x;
+          let dy = b.y - a.y;
+          let distSq = dx * dx + dy * dy;
+          let dist = Math.sqrt(distSq);
+          if (dist < a.radius + b.radius) continue; // skip collision
+          let force = (G * a.mass * b.mass) / distSq;
+          let ax = (force / a.mass) * (dx / dist);
+          let ay = (force / a.mass) * (dy / dist);
+          let bx = (force / b.mass) * (-dx / dist);
+          let by = (force / b.mass) * (-dy / dist);
+          a.vx += ax * simulationSpeed;
+          a.vy += ay * simulationSpeed;
+          b.vx += bx * simulationSpeed;
+          b.vy += by * simulationSpeed;
         }
       }
-
-      if (sx<-10||sx>window.innerWidth+10||sy<-10||sy>window.innerHeight+10) continue;
-      ctx.globalAlpha = 0.7;
-      ctx.fillStyle = s.c;
-      ctx.fillRect(sx, sy, s.s*cam.s, s.s*cam.s);
-    }
-    ctx.globalAlpha = 1;
-  }
-
-  function drawAccretionDisk(b){
-    if (!b.diskColors.length) return;
-    const center = worldToScreen(b.x, b.y);
-
-    // clockwise
-    b.diskRot -= 0.01;
-    b.waveT = (b.waveT || 0) + 0.05;
-
-    const maxRings = Math.min(8, b.diskColors.length);
-    const thick = 14 * cam.s;
-
-    ctx.save();
-    ctx.translate(center.x, center.y);
-    ctx.rotate(b.diskRot);
-    ctx.globalCompositeOperation = 'lighter';
-
-    for (let i=0;i<maxRings;i++){
-      const color = b.diskColors[i];
-      const inner = (b.radius*cam.s) + i*thick;
-      const outer = inner + thick;
-
-      // Outer halo pass
-      ctx.beginPath();
-      ringPath(inner, outer, b.waveT, i, 60, 3.5);
-      ctx.shadowBlur = 60;
-      ctx.shadowColor = color;
-      ctx.fillStyle = color;
-      ctx.globalAlpha = 0.30 * (1 - i/maxRings) * (0.9 + 0.1*Math.sin(b.waveT + i));
-      ctx.fill();
-
-      // Inner bright pass
-      ctx.beginPath();
-      ringPath(inner, outer, b.waveT, i, 60, 2.0);
-      ctx.shadowBlur = 35;
-      ctx.shadowColor = color;
-      ctx.fillStyle = color;
-      ctx.globalAlpha = 0.48 * (1 - i/maxRings) * (0.9 + 0.1*Math.cos(b.waveT*1.2 + i));
-      ctx.fill();
-
-      ctx.globalAlpha = 1;
-    }
-
-    ctx.restore();
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.shadowBlur = 0;
-  }
-
-  function ringPath(inner, outer, t, idx, steps=60, amp=3){
-    for (let a=0;a<=steps;a++){
-      const ang = (a/steps)*TAU;
-      const wob = Math.sin(ang*4 + t + idx)*amp;
-      const r = outer + wob;
-      const x = Math.cos(ang)*r, y = Math.sin(ang)*r;
-      if (a===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-    }
-    for (let a=steps;a>=0;a--){
-      const ang = (a/steps)*TAU;
-      const wob = Math.sin(ang*4 + t + idx)*amp;
-      const r = inner + wob;
-      const x = Math.cos(ang)*r, y = Math.sin(ang)*r;
-      ctx.lineTo(x,y);
-    }
-    ctx.closePath();
-  }
-
-  // ===== Object List UI =====
-  function drawObjectList(){
-    const bhList = document.getElementById('bhList');
-    const sunList = document.getElementById('sunList');
-    const planetStats = document.getElementById('planetStats');
-    bhList.innerHTML = `<b>Black Holes (${blackHoles.length})</b>` + blackHoles.map((b,idx)=>{
-      return `<div class="item" data-type="bh" data-idx="${idx}">#${idx+1} • mass ${Math.round(b.mass)} • r ${Math.round(b.radius)}</div>`;
-    }).join('');
-    sunList.innerHTML = `<b>Suns (${suns.length})</b>` + suns.map((s,idx)=>{
-      return `<div class="item" data-type="sun" data-idx="${idx}">#${idx+1} • mass ${Math.round(s.mass)} • r ${Math.round(s.radius)}</div>`;
-    }).join('');
-    planetStats.textContent = `Planets: ${planets.length}`;
-
-    // click handlers
-    for (const el of document.querySelectorAll('#bhList .item')){
-      el.onclick = ()=>{
-        const i = +el.getAttribute('data-idx');
-        if (blackHoles[i]) selectBH(blackHoles[i]);
-      };
-    }
-    for (const el of document.querySelectorAll('#sunList .item')){
-      el.onclick = ()=>{
-        const i = +el.getAttribute('data-idx');
-        if (suns[i]) selectSunPOV(suns[i]);
-      };
-    }
-  }
-  function refreshObjectList(){ drawObjectList(); }
-
-  // ===== Main Loop =====
-  let last = performance.now();
-  function tick(now){
-    const rawDt = Math.min(0.05, (now - last)/50);
-    last = now;
-    update(rawDt);
-    draw();
-    requestAnimationFrame(tick);
-  }
-  requestAnimationFrame(tick);
-
-  </script>
-
-<!-- Enable Music Button -->
-<button id="enableAudioBtn" style="position:absolute;top:50%;left:50%;
-  transform:translate(-50%,-50%);z-index:999;font-size:18px;padding:12px 20px;">
-  ▶ Enable Music
-</button>
-
-<div id="ytplayer"></div>
-<script src="https://www.youtube.com/iframe_api"></script>
-<script>
-  var player;
-  function onYouTubeIframeAPIReady() {
-    player = new YT.Player('ytplayer', {
-      height: '0', width: '0',
-      videoId: 'MU3EOO4fWQo',
-      playerVars: {
-        controls: 0, modestbranding: 1, loop: 1,
-        playlist: 'MU3EOO4fWQo', start: 0, end: 383
+      for (let obj of objects) {
+        obj.x += obj.vx * simulationSpeed;
+        obj.y += obj.vy * simulationSpeed;
       }
-    });
-  }
-
-  document.getElementById('enableAudioBtn').addEventListener('click', function(){
-    if (player && player.playVideo) {
-      player.setVolume(30);
-      player.playVideo();
     }
-    this.style.display = 'none'; // hide button once clicked
-  });
-</script>
-  
+
+    function loop() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawGrid();
+      updatePhysics();
+      for (let obj of objects) obj.draw();
+      requestAnimationFrame(loop);
+    }
+    loop();
+
+    // UI Handlers
+    document.getElementById("addObject").onclick = () => {
+      let type = document.getElementById("objectType").value;
+      if (type === "blackhole")
+        objects.push(new Body(canvas.width / 2, canvas.height / 2, 1000, "blackhole"));
+      else if (type === "star")
+        objects.push(new Body(Math.random() * canvas.width, Math.random() * canvas.height, 200, "star"));
+      else
+        objects.push(new Body(Math.random() * canvas.width, Math.random() * canvas.height, 50, "planet"));
+    };
+    document.getElementById("clear").onclick = () => (objects = []);
+    document.getElementById("speed").oninput = (e) => (simulationSpeed = parseFloat(e.target.value));
+  </script>
 </body>
 </html>
