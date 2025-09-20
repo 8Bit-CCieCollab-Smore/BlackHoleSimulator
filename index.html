@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Black Hole Fluid Simulator</title>
+  <title>2D Black Hole Fluid Simulator</title>
   <style>
     body { margin:0; overflow:hidden; background:#111; color:white; font-family:sans-serif; }
     #ui {
@@ -33,181 +33,167 @@
     const ctx=canvas.getContext("2d");
     resizeCanvas(); window.addEventListener("resize",resizeCanvas);
 
-    let objects=[], particles=[], simulationSpeed=1;
+    let simulationSpeed=1;
+    let objects=[];
 
-    class Body {
+    // ---- FLUID SIMULATION (Stable Fluids, Jos Stam) ----
+    const N = 128; // grid resolution
+    const size = (N+2)*(N+2);
+    let u=new Float32Array(size), v=new Float32Array(size);     // velocity
+    let uPrev=new Float32Array(size), vPrev=new Float32Array(size);
+    let dens=new Float32Array(size), densPrev=new Float32Array(size);
+
+    function IX(x,y){ return x + (N+2)*y; }
+
+    function addSource(x,s,dt){
+      for(let i=0;i<size;i++) x[i]+=dt*s[i];
+    }
+
+    function diffuse(b,x,x0,diff,dt){
+      let a=dt*diff*N*N;
+      for(let k=0;k<20;k++){
+        for(let i=1;i<=N;i++){
+          for(let j=1;j<=N;j++){
+            x[IX(i,j)]=(x0[IX(i,j)]+a*(x[IX(i-1,j)]+x[IX(i+1,j)]+x[IX(i,j-1)]+x[IX(i,j+1)]))/(1+4*a);
+          }
+        }
+        setBnd(b,x);
+      }
+    }
+
+    function advect(b,d,d0,u,v,dt){
+      let dt0=dt*N;
+      for(let i=1;i<=N;i++){
+        for(let j=1;j<=N;j++){
+          let x=i-dt0*u[IX(i,j)];
+          let y=j-dt0*v[IX(i,j)];
+          if(x<0.5)x=0.5;if(x>N+0.5)x=N+0.5;
+          if(y<0.5)y=0.5;if(y>N+0.5)y=N+0.5;
+          let i0=Math.floor(x), i1=i0+1;
+          let j0=Math.floor(y), j1=j0+1;
+          let s1=x-i0, s0=1-s1;
+          let t1=y-j0, t0=1-t1;
+          d[IX(i,j)]=
+            s0*(t0*d0[IX(i0,j0)]+t1*d0[IX(i0,j1)])+
+            s1*(t0*d0[IX(i1,j0)]+t1*d0[IX(i1,j1)]);
+        }
+      }
+      setBnd(b,d);
+    }
+
+    function project(u,v,p,div){
+      for(let i=1;i<=N;i++){
+        for(let j=1;j<=N;j++){
+          div[IX(i,j)]=-0.5*(u[IX(i+1,j)]-u[IX(i-1,j)]+v[IX(i,j+1)]-v[IX(i,j-1)])/N;
+          p[IX(i,j)]=0;
+        }
+      }
+      setBnd(0,div); setBnd(0,p);
+      for(let k=0;k<20;k++){
+        for(let i=1;i<=N;i++){
+          for(let j=1;j<=N;j++){
+            p[IX(i,j)]=(div[IX(i,j)]+p[IX(i-1,j)]+p[IX(i+1,j)]+p[IX(i,j-1)]+p[IX(i,j+1)])/4;
+          }
+        }
+        setBnd(0,p);
+      }
+      for(let i=1;i<=N;i++){
+        for(let j=1;j<=N;j++){
+          u[IX(i,j)]-=0.5*N*(p[IX(i+1,j)]-p[IX(i-1,j)]);
+          v[IX(i,j)]-=0.5*N*(p[IX(i,j+1)]-p[IX(i,j-1)]);
+        }
+      }
+      setBnd(1,u); setBnd(2,v);
+    }
+
+    function densityStep(x,x0,u,v,diff,dt){
+      addSource(x,x0,dt);
+      [x,x0]=[x0,x]; diffuse(0,x,x0,diff,dt);
+      [x,x0]=[x0,x]; advect(0,x,x0,u,v,dt);
+    }
+
+    function velocityStep(u,v,u0,v0,visc,dt){
+      addSource(u,u0,dt); addSource(v,v0,dt);
+      [u,u0]=[u0,u]; diffuse(1,u,u0,visc,dt);
+      [v,v0]=[v0,v]; diffuse(2,v,v0,visc,dt);
+      project(u,v,u0,v0);
+      [u,u0]=[u0,u]; [v,v0]=[v0,v];
+      advect(1,u,u0,u0,v0,dt);
+      advect(2,v,v0,u0,v0,dt);
+      project(u,v,u0,v0);
+    }
+
+    function setBnd(b,x){
+      for(let i=1;i<=N;i++){
+        x[IX(0,i)]=b===1?-x[IX(1,i)]:x[IX(1,i)];
+        x[IX(N+1,i)]=b===1?-x[IX(N,i)]:x[IX(N,i)];
+        x[IX(i,0)]=b===2?-x[IX(i,1)]:x[IX(i,1)];
+        x[IX(i,N+1)]=b===2?-x[IX(i,N)]:x[IX(i,N)];
+      }
+      x[IX(0,0)]=0.5*(x[IX(1,0)]+x[IX(0,1)]);
+      x[IX(0,N+1)]=0.5*(x[IX(1,N+1)]+x[IX(0,N)]);
+      x[IX(N+1,0)]=0.5*(x[IX(N,0)]+x[IX(N+1,1)]);
+      x[IX(N+1,N+1)]=0.5*(x[IX(N,N+1)]+x[IX(N+1,N)]);
+    }
+
+    // ---- OBJECTS ----
+    class Body{
       constructor(x,y,mass,type){
         this.x=x; this.y=y;
-        this.vx=(Math.random()-0.5)*0.5;
-        this.vy=(Math.random()-0.5)*0.5;
+        this.vx=0; this.vy=0;
         this.mass=mass; this.type=type;
         this.radius=Math.cbrt(mass)*2;
         this.destroyed=false;
-        this.stretchFactor=1;
       }
       draw(){
+        ctx.beginPath();
         if(this.type==="blackhole"){
-          ctx.beginPath();
           ctx.fillStyle="black";
           ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);
           ctx.fill();
-          return;
-        }
-        let col=this.type==="star"?"yellow":"lightblue";
-        ctx.fillStyle=col;
-        ctx.shadowBlur=this.type==="star"?20:0;
-        ctx.shadowColor=col;
-
-        ctx.beginPath();
-        if(this.stretchFactor>1.05){
-          ctx.save();
-          ctx.translate(this.x,this.y);
-          ctx.rotate(this.stretchAngle||0);
-          ctx.scale(this.stretchFactor,1/this.stretchFactor);
-          ctx.arc(0,0,this.radius,0,Math.PI*2);
-          ctx.restore();
         } else {
+          ctx.fillStyle=this.type==="star"?"yellow":"lightblue";
           ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);
+          ctx.fill();
         }
-        ctx.fill();
-        ctx.shadowBlur=0;
       }
     }
 
-    class Particle {
-      constructor(x,y,vx,vy,color,life=500,orbitingBH=null){
-        this.x=x; this.y=y;
-        this.vx=vx; this.vy=vy;
-        this.mass=0.5;
-        this.color=color;
-        this.life=life;
-        this.history=[];
-        this.orbitingBH=orbitingBH;
-      }
-      update(){
-        // If part of accretion disk, adjust orbit velocity
-        if(this.orbitingBH){
-          let dx=this.x-this.orbitingBH.x;
-          let dy=this.y-this.orbitingBH.y;
-          let dist=Math.sqrt(dx*dx+dy*dy);
-          let angle=Math.atan2(dy,dx);
-          let speed=2; // orbital speed
-          this.vx=-Math.sin(angle)*speed;
-          this.vy=Math.cos(angle)*speed;
-        }
-        this.x+=this.vx*simulationSpeed;
-        this.y+=this.vy*simulationSpeed;
-        this.life--;
-
-        // keep short trail history
-        this.history.push({x:this.x,y:this.y});
-        if(this.history.length>10) this.history.shift();
-      }
-      draw(){
-        ctx.strokeStyle=this.color;
-        ctx.globalAlpha=Math.max(this.life/500,0.2);
-        ctx.beginPath();
-        for(let i=0;i<this.history.length;i++){
-          let p=this.history[i];
-          if(i===0) ctx.moveTo(p.x,p.y);
-          else ctx.lineTo(p.x,p.y);
-        }
-        ctx.stroke();
-        ctx.globalAlpha=1;
-      }
-    }
-
-    function resizeCanvas(){
-      canvas.width=window.innerWidth;
-      canvas.height=window.innerHeight;
-    }
-
-    function distortPoint(x,y){
-      let ox=0,oy=0;
-      for(let obj of objects){
-        if(obj.type!=="blackhole") continue;
-        let dx=x-obj.x, dy=y-obj.y;
-        let distSq=dx*dx+dy*dy, dist=Math.sqrt(distSq);
-        if(dist<250){
-          let s=(obj.radius*250)/(distSq+50);
-          ox+=-dx/dist*s; oy+=-dy/dist*s;
-        }
-      }
-      return [x+ox,y+oy];
-    }
-
-    function drawGrid(){
-      let step=40;
-      ctx.strokeStyle="rgba(200,200,200,0.25)";
-      for(let x=0;x<canvas.width;x+=step){
-        ctx.beginPath();
-        for(let y=0;y<=canvas.height;y+=step){
-          let [dx,dy]=distortPoint(x,y);
-          if(y===0) ctx.moveTo(dx,dy); else ctx.lineTo(dx,dy);
-        }
-        ctx.stroke();
-      }
-      for(let y=0;y<canvas.height;y+=step){
-        ctx.beginPath();
-        for(let x=0;x<=canvas.width;x+=step){
-          let [dx,dy]=distortPoint(x,y);
-          if(x===0) ctx.moveTo(dx,dy); else ctx.lineTo(dx,dy);
-        }
-        ctx.stroke();
-      }
-    }
-
-    function updatePhysics(){
-      const G=0.1;
-      let allBodies=[...objects,...particles];
-      for(let i=0;i<allBodies.length;i++){
-        let a=allBodies[i]; if(a.destroyed) continue;
-        for(let j=i+1;j<allBodies.length;j++){
-          let b=allBodies[j]; if(b.destroyed) continue;
-          if(a===b) continue;
+    // ---- SIMULATION LOOP ----
+    function step(){
+      const dt=0.1;
+      // Gravity
+      for(let i=0;i<objects.length;i++){
+        let a=objects[i]; if(a.destroyed) continue;
+        for(let j=i+1;j<objects.length;j++){
+          let b=objects[j]; if(b.destroyed) continue;
           let dx=b.x-a.x, dy=b.y-a.y;
           let distSq=dx*dx+dy*dy, dist=Math.sqrt(distSq);
           if(dist<1) continue;
-          let force=(G*a.mass*b.mass)/distSq;
-          let ax=(force/a.mass)*(dx/dist), ay=(force/a.mass)*(dy/dist);
-          let bx=(force/b.mass)*(-dx/dist), by=(force/b.mass)*(-dy/dist);
-          if(a.vx!==undefined){a.vx+=ax*simulationSpeed;a.vy+=ay*simulationSpeed;}
-          if(b.vx!==undefined){b.vx+=bx*simulationSpeed;b.vy+=by*simulationSpeed;}
+          let F=(a.mass*b.mass)/(distSq);
+          let fx=F*dx/dist, fy=F*dy/dist;
+          a.vx+=fx/a.mass*simulationSpeed*dt;
+          a.vy+=fy/a.mass*simulationSpeed*dt;
+          b.vx-=fx/b.mass*simulationSpeed*dt;
+          b.vy-=fy/b.mass*simulationSpeed*dt;
 
-          // Spaghettification
-          if(((a.type==="star"||a.type==="planet")&&b.type==="blackhole")||
-             ((b.type==="star"||b.type==="planet")&&a.type==="blackhole")){
+          // Spaghettify stars into fluid
+          if((a.type==="star"||a.type==="planet")&&b.type==="blackhole"||
+             (b.type==="star"||b.type==="planet")&&a.type==="blackhole"){
             let star=a.type==="blackhole"?b:a;
             let bh=a.type==="blackhole"?a:b;
-            if(dist<bh.radius*8 && !star.destroyed){
-              star.stretchFactor=Math.min(3,1+(bh.radius*5)/distSq*50);
-              star.stretchAngle=Math.atan2(bh.y-star.y,bh.x-star.x);
-
-              // shed stream directed toward BH
-              let dirX=(bh.x-star.x)/dist, dirY=(bh.y-star.y)/dist;
-              let spread=0.3;
-              let angle=Math.atan2(dirY,dirX)+(Math.random()-0.5)*spread;
-              let speed=2;
-              particles.push(new Particle(
-                star.x,star.y,
-                Math.cos(angle)*speed,Math.sin(angle)*speed,
-                star.type==="star"?"orange":"lightblue",600
-              ));
-
+            if(dist<bh.radius*8){
+              // inject fluid toward BH
+              let i=Math.floor((star.x/canvas.width)*N);
+              let j=Math.floor((star.y/canvas.height)*N);
+              if(i>1&&i<N&&j>1&&j<N){
+                dens[IX(i,j)]+=20;
+                u[IX(i,j)]+=(bh.x-star.x)/dist*2;
+                v[IX(i,j)]+=(bh.y-star.y)/dist*2;
+              }
               star.mass*=0.995;
               star.radius=Math.cbrt(star.mass)*2;
-              if(star.mass<15){
-                star.destroyed=true;
-                // accretion disk
-                for(let ang=0;ang<Math.PI*2;ang+=0.1){
-                  let distDisk=bh.radius*3+Math.random()*15;
-                  let px=bh.x+Math.cos(ang)*distDisk;
-                  let py=bh.y+Math.sin(ang)*distDisk;
-                  particles.push(new Particle(px,py,0,0,"orange",1200,bh));
-                }
-              }
-            } else {
-              star.stretchFactor=1;
+              if(star.mass<15) star.destroyed=true;
             }
           }
         }
@@ -217,33 +203,45 @@
         if(obj.destroyed) continue;
         obj.x+=obj.vx*simulationSpeed;
         obj.y+=obj.vy*simulationSpeed;
-        if(obj.x<obj.radius||obj.x>canvas.width-obj.radius) obj.vx*=-1;
-        if(obj.y<obj.radius||obj.y>canvas.height-obj.radius) obj.vy*=-1;
       }
-      for(let p of particles) p.update();
-      particles=particles.filter(p=>p.life>0);
+
+      // Fluid update
+      velocityStep(u,v,uPrev,vPrev,0.0001,dt);
+      densityStep(dens,densPrev,u,v,0.00001,dt);
+    }
+
+    function render(){
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      // Draw fluid as glowing density
+      let cellW=canvas.width/N, cellH=canvas.height/N;
+      for(let i=1;i<=N;i++){
+        for(let j=1;j<=N;j++){
+          let d=dens[IX(i,j)];
+          if(d>0.1){
+            ctx.fillStyle=`rgba(255,165,0,${Math.min(1,d/50)})`;
+            ctx.fillRect((i-1)*cellW,(j-1)*cellH,cellW,cellH);
+          }
+        }
+      }
+      // Draw objects
+      for(let obj of objects) if(!obj.destroyed) obj.draw();
     }
 
     function loop(){
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-      drawGrid();
-      updatePhysics();
-      for(let obj of objects) if(!obj.destroyed) obj.draw();
-      for(let p of particles) p.draw();
+      step(); render();
       requestAnimationFrame(loop);
     }
     loop();
 
+    // ---- UI ----
+    function resizeCanvas(){canvas.width=window.innerWidth;canvas.height=window.innerHeight;}
     document.getElementById("addObject").onclick=()=>{
       let type=document.getElementById("objectType").value;
-      if(type==="blackhole")
-        objects.push(new Body(canvas.width/2,canvas.height/2,2000,"blackhole"));
-      else if(type==="star")
-        objects.push(new Body(Math.random()*canvas.width,Math.random()*canvas.height,400,"star"));
-      else
-        objects.push(new Body(Math.random()*canvas.width,Math.random()*canvas.height,100,"planet"));
+      if(type==="blackhole") objects.push(new Body(canvas.width/2,canvas.height/2,2000,"blackhole"));
+      else if(type==="star") objects.push(new Body(Math.random()*canvas.width,Math.random()*canvas.height,400,"star"));
+      else objects.push(new Body(Math.random()*canvas.width,Math.random()*canvas.height,100,"planet"));
     };
-    document.getElementById("clear").onclick=()=>{objects=[];particles=[];};
+    document.getElementById("clear").onclick=()=>{objects=[]; dens.fill(0);};
     document.getElementById("speed").oninput=(e)=>simulationSpeed=parseFloat(e.target.value);
   </script>
 </body>
