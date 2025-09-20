@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>2D Black Hole Simulator</title>
+  <title>Black Hole Fluid Simulator</title>
   <style>
     body {
       margin: 0;
       overflow: hidden;
-      background: #222;
+      background: #111;
       color: white;
       font-family: sans-serif;
     }
@@ -15,16 +15,12 @@
       position: absolute;
       top: 10px;
       left: 10px;
-      background: rgba(0, 0, 0, 0.6);
+      background: rgba(0,0,0,0.6);
       padding: 10px;
       border-radius: 8px;
     }
-    #ui button, #ui select, #ui input {
-      margin: 4px;
-    }
-    canvas {
-      display: block;
-    }
+    #ui button, #ui select, #ui input { margin: 4px; }
+    canvas { display: block; }
   </style>
 </head>
 <body>
@@ -54,212 +50,203 @@
 
     class Body {
       constructor(x, y, mass, type) {
-        this.x = x;
-        this.y = y;
-        this.vx = (Math.random() - 0.5) * 0.5;
-        this.vy = (Math.random() - 0.5) * 0.5;
+        this.x = x; this.y = y;
+        this.vx = (Math.random()-0.5)*0.5;
+        this.vy = (Math.random()-0.5)*0.5;
         this.mass = mass;
         this.type = type;
-        this.radius = Math.cbrt(mass) * 2;
+        this.radius = Math.cbrt(mass)*2;
         this.destroyed = false;
+        this.stretchFactor = 1; // how elongated it is
       }
       draw() {
-        if (this.type === "blackhole") {
+        if (this.type==="blackhole") {
           ctx.beginPath();
-          ctx.fillStyle = "black";
-          ctx.arc(this.x, this.y, this.radius, 0, 2 * Math.PI);
+          ctx.fillStyle="black";
+          ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);
           ctx.fill();
-        } else if (this.type === "star") {
-          ctx.beginPath();
-          ctx.fillStyle = "yellow";
-          ctx.shadowBlur = 20;
-          ctx.shadowColor = "yellow";
-          ctx.arc(this.x, this.y, this.radius, 0, 2 * Math.PI);
-          ctx.fill();
-          ctx.shadowBlur = 0;
-        } else {
-          ctx.beginPath();
-          ctx.fillStyle = "lightblue";
-          ctx.arc(this.x, this.y, this.radius, 0, 2 * Math.PI);
-          ctx.fill();
+          return;
         }
+
+        // color
+        let col = this.type==="star" ? "yellow" : "lightblue";
+        ctx.fillStyle = col;
+        ctx.shadowBlur = this.type==="star"?20:0;
+        ctx.shadowColor = col;
+
+        ctx.beginPath();
+        if (this.stretchFactor>1.05) {
+          // draw stretched ellipse
+          ctx.save();
+          ctx.translate(this.x,this.y);
+          ctx.rotate(this.stretchAngle||0);
+          ctx.scale(this.stretchFactor,1/this.stretchFactor);
+          ctx.arc(0,0,this.radius,0,Math.PI*2);
+          ctx.restore();
+        } else {
+          ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);
+        }
+        ctx.fill();
+        ctx.shadowBlur=0;
       }
     }
 
     class Particle {
-      constructor(x, y, vx, vy, color, life=500) {
-        this.x = x;
-        this.y = y;
-        this.vx = vx;
-        this.vy = vy;
-        this.life = life;
-        this.color = color;
+      constructor(x,y,vx,vy,color,life=500) {
+        this.x=x; this.y=y;
+        this.vx=vx; this.vy=vy;
+        this.mass=1;
+        this.color=color;
+        this.life=life;
       }
-      update() {
-        this.x += this.vx * simulationSpeed;
-        this.y += this.vy * simulationSpeed;
+      update(){
+        this.x+=this.vx*simulationSpeed;
+        this.y+=this.vy*simulationSpeed;
         this.life--;
       }
-      draw() {
-        ctx.fillStyle = this.color;
-        ctx.globalAlpha = Math.max(this.life / 500, 0.2);
-        ctx.fillRect(this.x, this.y, 2, 2);
-        ctx.globalAlpha = 1;
+      draw(){
+        ctx.fillStyle=this.color;
+        ctx.globalAlpha=Math.max(this.life/500,0.15);
+        ctx.fillRect(this.x,this.y,2,2);
+        ctx.globalAlpha=1;
       }
     }
 
-    function resizeCanvas() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+    function resizeCanvas(){
+      canvas.width=window.innerWidth;
+      canvas.height=window.innerHeight;
     }
 
-    function drawGrid() {
-      let step = 40;
-      ctx.strokeStyle = "rgba(200,200,200,0.2)";
-      ctx.lineWidth = 1;
+    function distortPoint(x,y){
+      let ox=0, oy=0;
+      for (let obj of objects){
+        if(obj.type!=="blackhole") continue;
+        let dx=x-obj.x, dy=y-obj.y;
+        let distSq=dx*dx+dy*dy, dist=Math.sqrt(distSq);
+        if(dist<250){
+          let s=(obj.radius*250)/(distSq+50);
+          ox+=-dx/dist*s; oy+=-dy/dist*s;
+        }
+      }
+      return [x+ox,y+oy];
+    }
 
-      for (let x = 0; x < canvas.width; x += step) {
+    function drawGrid(){
+      let step=40;
+      ctx.strokeStyle="rgba(200,200,200,0.25)";
+      for(let x=0;x<canvas.width;x+=step){
         ctx.beginPath();
-        for (let y = 0; y <= canvas.height; y += step) {
-          let [dx, dy] = distortPoint(x, y);
-          if (y === 0) ctx.moveTo(dx, dy);
-          else ctx.lineTo(dx, dy);
+        for(let y=0;y<=canvas.height;y+=step){
+          let [dx,dy]=distortPoint(x,y);
+          if(y===0) ctx.moveTo(dx,dy); else ctx.lineTo(dx,dy);
         }
         ctx.stroke();
       }
-
-      for (let y = 0; y < canvas.height; y += step) {
+      for(let y=0;y<canvas.height;y+=step){
         ctx.beginPath();
-        for (let x = 0; x <= canvas.width; x += step) {
-          let [dx, dy] = distortPoint(x, y);
-          if (x === 0) ctx.moveTo(dx, dy);
-          else ctx.lineTo(dx, dy);
+        for(let x=0;x<=canvas.width;x+=step){
+          let [dx,dy]=distortPoint(x,y);
+          if(x===0) ctx.moveTo(dx,dy); else ctx.lineTo(dx,dy);
         }
         ctx.stroke();
       }
     }
 
-    function distortPoint(x, y) {
-      let offsetX = 0, offsetY = 0;
-      for (let obj of objects) {
-        if (obj.type !== "blackhole") continue;
-        let dx = x - obj.x;
-        let dy = y - obj.y;
-        let distSq = dx*dx + dy*dy;
-        let dist = Math.sqrt(distSq);
-        if (dist < 200) { // distortion radius
-          let strength = (obj.radius * 200) / (distSq+1);
-          offsetX += -dx / dist * strength;
-          offsetY += -dy / dist * strength;
-        }
-      }
-      return [x + offsetX, y + offsetY];
-    }
-
-    function updatePhysics() {
-      const G = 0.1;
-      for (let i = 0; i < objects.length; i++) {
-        let a = objects[i];
-        if (a.destroyed) continue;
-        for (let j = i + 1; j < objects.length; j++) {
-          let b = objects[j];
-          if (b.destroyed) continue;
-
-          let dx = b.x - a.x;
-          let dy = b.y - a.y;
-          let distSq = dx * dx + dy * dy;
-          let dist = Math.sqrt(distSq);
-          if (dist < 1) continue;
-
-          let force = (G * a.mass * b.mass) / distSq;
-          let ax = (force / a.mass) * (dx / dist);
-          let ay = (force / a.mass) * (dy / dist);
-          let bx = (force / b.mass) * (-dx / dist);
-          let by = (force / b.mass) * (-dy / dist);
-
-          a.vx += ax * simulationSpeed;
-          a.vy += ay * simulationSpeed;
-          b.vx += bx * simulationSpeed;
-          b.vy += by * simulationSpeed;
+    function updatePhysics(){
+      const G=0.1;
+      let allBodies=[...objects,...particles];
+      for(let i=0;i<allBodies.length;i++){
+        let a=allBodies[i]; if(a.destroyed) continue;
+        for(let j=i+1;j<allBodies.length;j++){
+          let b=allBodies[j]; if(b.destroyed) continue;
+          if(a===b) continue;
+          let dx=b.x-a.x, dy=b.y-a.y;
+          let distSq=dx*dx+dy*dy, dist=Math.sqrt(distSq);
+          if(dist<1) continue;
+          let force=(G*a.mass*b.mass)/distSq;
+          let ax=(force/a.mass)*(dx/dist), ay=(force/a.mass)*(dy/dist);
+          let bx=(force/b.mass)*(-dx/dist), by=(force/b.mass)*(-dy/dist);
+          if(a.vx!==undefined){a.vx+=ax*simulationSpeed;a.vy+=ay*simulationSpeed;}
+          if(b.vx!==undefined){b.vx+=bx*simulationSpeed;b.vy+=by*simulationSpeed;}
 
           // Spaghettification check
-          if ((a.type !== "blackhole" && b.type === "blackhole") ||
-              (b.type !== "blackhole" && a.type === "blackhole")) {
-            let star = a.type === "blackhole" ? b : a;
-            let bh = a.type === "blackhole" ? a : b;
-            if (dist < bh.radius * 6) {
-              // turn star into particles
-              for (let k = 0; k < 10; k++) {
-                let angle = Math.random() * Math.PI * 2;
-                let speed = 1 + Math.random() * 2;
+          if(((a.type==="star"||a.type==="planet") && b.type==="blackhole") ||
+             ((b.type==="star"||b.type==="planet") && a.type==="blackhole")){
+            let star=a.type==="blackhole"?b:a;
+            let bh=a.type==="blackhole"?a:b;
+            if(dist<bh.radius*8 && !star.destroyed){
+              // Stretch visually toward BH
+              star.stretchFactor = Math.min(3, 1 + (bh.radius*5)/distSq*50);
+              star.stretchAngle = Math.atan2(bh.y-star.y,bh.x-star.x);
+
+              // Shed fragments
+              for(let k=0;k<2;k++){
+                let angle=Math.random()*Math.PI*2;
+                let speed=0.5+Math.random()*1;
                 particles.push(new Particle(
-                  star.x, star.y,
-                  Math.cos(angle) * speed, Math.sin(angle) * speed,
-                  star.type === "star" ? "orange" : "lightblue"
+                  star.x,star.y,
+                  Math.cos(angle)*speed,Math.sin(angle)*speed,
+                  star.type==="star"?"orange":"lightblue",600
                 ));
               }
-              star.mass *= 0.98;
-              star.radius = Math.cbrt(star.mass) * 2;
-              if (star.mass < 10) {
-                star.destroyed = true;
-                // Accretion disk
-                for (let ang = 0; ang < Math.PI * 2; ang += 0.1) {
-                  let distDisk = bh.radius * 3 + Math.random() * 20;
-                  let px = bh.x + Math.cos(ang) * distDisk;
-                  let py = bh.y + Math.sin(ang) * distDisk;
-                  let tangentialSpeed = 2;
-                  particles.push(new Particle(
-                    px, py,
-                    -Math.sin(ang) * tangentialSpeed,
-                    Math.cos(ang) * tangentialSpeed,
-                    "orange", 800
-                  ));
+
+              // Lose mass gradually
+              star.mass*=0.995;
+              star.radius=Math.cbrt(star.mass)*2;
+
+              if(star.mass<15){
+                star.destroyed=true;
+                // Create rotating accretion disk
+                for(let ang=0;ang<Math.PI*2;ang+=0.1){
+                  let distDisk=bh.radius*3+Math.random()*20;
+                  let px=bh.x+Math.cos(ang)*distDisk;
+                  let py=bh.y+Math.sin(ang)*distDisk;
+                  let speed=2;
+                  particles.push(new Particle(px,py,
+                    -Math.sin(ang)*speed,Math.cos(ang)*speed,
+                    "orange",1000));
                 }
               }
+            } else {
+              star.stretchFactor=1;
             }
           }
         }
       }
 
-      // update positions
-      for (let obj of objects) {
-        if (obj.destroyed) continue;
-        obj.x += obj.vx * simulationSpeed;
-        obj.y += obj.vy * simulationSpeed;
-        // containment
-        if (obj.x < obj.radius || obj.x > canvas.width - obj.radius) obj.vx *= -1;
-        if (obj.y < obj.radius || obj.y > canvas.height - obj.radius) obj.vy *= -1;
+      for(let obj of objects){
+        if(obj.destroyed) continue;
+        obj.x+=obj.vx*simulationSpeed;
+        obj.y+=obj.vy*simulationSpeed;
+        if(obj.x<obj.radius||obj.x>canvas.width-obj.radius) obj.vx*=-1;
+        if(obj.y<obj.radius||obj.y>canvas.height-obj.radius) obj.vy*=-1;
       }
-
-      for (let p of particles) p.update();
-      particles = particles.filter(p => p.life > 0);
+      for(let p of particles) p.update();
+      particles=particles.filter(p=>p.life>0);
     }
 
-    function loop() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    function loop(){
+      ctx.clearRect(0,0,canvas.width,canvas.height);
       drawGrid();
       updatePhysics();
-      for (let obj of objects) if (!obj.destroyed) obj.draw();
-      for (let p of particles) p.draw();
+      for(let obj of objects) if(!obj.destroyed) obj.draw();
+      for(let p of particles) p.draw();
       requestAnimationFrame(loop);
     }
     loop();
 
     // UI
-    document.getElementById("addObject").onclick = () => {
-      let type = document.getElementById("objectType").value;
-      if (type === "blackhole")
-        objects.push(new Body(canvas.width / 2, canvas.height / 2, 2000, "blackhole"));
-      else if (type === "star")
-        objects.push(new Body(Math.random() * canvas.width, Math.random() * canvas.height, 300, "star"));
+    document.getElementById("addObject").onclick=()=>{
+      let type=document.getElementById("objectType").value;
+      if(type==="blackhole")
+        objects.push(new Body(canvas.width/2,canvas.height/2,2000,"blackhole"));
+      else if(type==="star")
+        objects.push(new Body(Math.random()*canvas.width,Math.random()*canvas.height,400,"star"));
       else
-        objects.push(new Body(Math.random() * canvas.width, Math.random() * canvas.height, 80, "planet"));
+        objects.push(new Body(Math.random()*canvas.width,Math.random()*canvas.height,100,"planet"));
     };
-    document.getElementById("clear").onclick = () => {
-      objects = [];
-      particles = [];
-    };
-    document.getElementById("speed").oninput = (e) => (simulationSpeed = parseFloat(e.target.value));
+    document.getElementById("clear").onclick=()=>{objects=[];particles=[];};
+    document.getElementById("speed").oninput=(e)=>simulationSpeed=parseFloat(e.target.value);
   </script>
 </body>
 </html>
