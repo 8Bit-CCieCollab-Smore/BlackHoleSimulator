@@ -63,32 +63,32 @@
         this.x=x; this.y=y;
         this.vx=vx; this.vy=vy;
         this.color=color;
-        this.life=1000;
+        this.life=1500;
         this.history=[];
       }
       update(bh){
         // Gravity pull toward BH
         let dx=bh.x-this.x, dy=bh.y-this.y;
         let distSq=dx*dx+dy*dy, dist=Math.sqrt(distSq);
-        let G=0.5;
+        let G=1.2;
         let F=G/(distSq+1);
         this.vx+=F*dx/dist*simulationSpeed;
         this.vy+=F*dy/dist*simulationSpeed;
 
-        // Small drag for stability
-        this.vx*=0.995;
-        this.vy*=0.995;
+        // Drag to make orbits stable
+        this.vx*=0.999;
+        this.vy*=0.999;
 
         this.x+=this.vx*simulationSpeed;
         this.y+=this.vy*simulationSpeed;
 
         this.history.push({x:this.x,y:this.y});
-        if(this.history.length>15) this.history.shift();
+        if(this.history.length>25) this.history.shift();
         this.life--;
       }
       draw(){
         ctx.strokeStyle=this.color;
-        ctx.globalAlpha=Math.max(this.life/1000,0.2);
+        ctx.globalAlpha=Math.max(this.life/1500,0.25);
         ctx.beginPath();
         for(let i=0;i<this.history.length;i++){
           let p=this.history[i];
@@ -101,10 +101,11 @@
 
     function spawnDisk(bh,color){
       for(let ang=0;ang<Math.PI*2;ang+=0.1){
-        let r=bh.radius*3+Math.random()*20;
+        let r=bh.radius*4+Math.random()*25;
         let px=bh.x+Math.cos(ang)*r;
         let py=bh.y+Math.sin(ang)*r;
-        let speed=2;
+        // Give correct tangential velocity
+        let speed=Math.sqrt(bh.mass)/r*2;
         let vx=-Math.sin(ang)*speed;
         let vy=Math.cos(ang)*speed;
         particles.push(new Particle(px,py,vx,vy,color));
@@ -122,10 +123,10 @@
           if(dist<1) continue;
           let F=(a.mass*b.mass)/distSq;
           let fx=F*dx/dist, fy=F*dy/dist;
-          a.vx+=fx/a.mass*simulationSpeed*0.1;
-          a.vy+=fy/a.mass*simulationSpeed*0.1;
-          b.vx-=fx/b.mass*simulationSpeed*0.1;
-          b.vy-=fy/b.mass*simulationSpeed*0.1;
+          a.vx+=fx/a.mass*simulationSpeed*0.05;
+          a.vy+=fy/a.mass*simulationSpeed*0.05;
+          b.vx-=fx/b.mass*simulationSpeed*0.05;
+          b.vy-=fy/b.mass*simulationSpeed*0.05;
 
           // Spaghettify star near BH
           if((a.type!=="blackhole"&&b.type==="blackhole")||(b.type!=="blackhole"&&a.type==="blackhole")){
@@ -134,10 +135,11 @@
             if(dist<bh.radius*8 && !star.destroyed){
               star.mass*=0.995;
               star.radius=Math.cbrt(star.mass)*2;
-              // Shed fragments into orbit
-              if(Math.random()<0.3){
-                let angle=Math.atan2(dy,dx);
-                let speed=2;
+              // Shed orbital fragments
+              if(Math.random()<0.4){
+                let angle=Math.atan2(star.y-bh.y,star.x-bh.x);
+                let r=dist;
+                let speed=Math.sqrt(bh.mass)/r*2;
                 let vx=-Math.sin(angle)*speed;
                 let vy=Math.cos(angle)*speed;
                 particles.push(new Particle(star.x,star.y,vx,vy,star.type==="star"?"orange":"lightblue"));
@@ -166,9 +168,45 @@
       }
     }
 
+    function distortPoint(x,y){
+      let ox=0,oy=0;
+      for(let obj of objects){
+        if(obj.type!=="blackhole") continue;
+        let dx=x-obj.x, dy=y-obj.y;
+        let distSq=dx*dx+dy*dy, dist=Math.sqrt(distSq);
+        if(dist<300){
+          let s=(obj.radius*300)/(distSq+50);
+          ox+=-dx/dist*s; oy+=-dy/dist*s;
+        }
+      }
+      return [x+ox,y+oy];
+    }
+
+    function drawGrid(){
+      let step=50;
+      ctx.strokeStyle="rgba(200,200,200,0.15)";
+      for(let x=0;x<canvas.width;x+=step){
+        ctx.beginPath();
+        for(let y=0;y<=canvas.height;y+=step){
+          let [dx,dy]=distortPoint(x,y);
+          if(y===0) ctx.moveTo(dx,dy); else ctx.lineTo(dx,dy);
+        }
+        ctx.stroke();
+      }
+      for(let y=0;y<canvas.height;y+=step){
+        ctx.beginPath();
+        for(let x=0;x<=canvas.width;x+=step){
+          let [dx,dy]=distortPoint(x,y);
+          if(x===0) ctx.moveTo(dx,dy); else ctx.lineTo(dx,dy);
+        }
+        ctx.stroke();
+      }
+    }
+
     function render(){
       ctx.fillStyle="rgba(17,17,17,0.4)";
       ctx.fillRect(0,0,canvas.width,canvas.height);
+      drawGrid();
       for(let obj of objects) if(!obj.destroyed) obj.draw();
       for(let p of particles) p.draw();
     }
