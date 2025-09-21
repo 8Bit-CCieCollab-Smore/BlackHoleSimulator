@@ -384,34 +384,29 @@ function drawBody(b,dt){
   ctx.restore();
 }
 
-  /* ============================================================
- * CHUNK 3 — Presets + Extras
+/* ============================================================
+ * CHUNK 3 — Presets + Extras (Safe Version)
  * ============================================================ */
 
-// Speed of light cap
 const C = 300; // arbitrary max velocity
 
-// Limit velocities + doppler tint
 function applyRelativity(b){
   const v = Math.hypot(b.vx,b.vy);
   if(v > C){
     b.vx *= C/v;
     b.vy *= C/v;
   }
-  // Doppler tint for planets/stars
   if(b.type !== TYPE.BH){
-    const shift = v / C; // 0..1
+    const shift = v / C;
     if(shift > 0.05){
-      // Shift towards blue if moving left, red if right
       const dir = b.vx > 0 ? 1 : -1;
       const amt = Math.min(shift*0.7,0.5);
-      if(dir>0) b.color = `rgba(${255},${Math.floor(255*(1-amt))},${Math.floor(255*(1-amt))},1)`;
+      if(dir>0) b.color = `rgba(255,${Math.floor(255*(1-amt))},${Math.floor(255*(1-amt))},1)`;
       else b.color = `rgba(${Math.floor(255*(1-amt))},${Math.floor(255*(1-amt))},255,1)`;
     }
   }
 }
 
-// Apply relativity each step
 const oldGravityStep = gravityStep;
 gravityStep = function(dt){
   oldGravityStep(dt);
@@ -423,7 +418,6 @@ function spawnSolarSystem(){
   bodies.length=0; trails.length=0;
   const sun = makeBody(TYPE.STAR,{x:0,y:0,m:15000,vx:0,vy:0,name:"Sun",color:"#ffd27f"});
   sun.locked=true;
-
   const planetData = [
     {name:"Mercury",dist:100,vel:90,color:"#aaa"},
     {name:"Venus",dist:160,vel:70,color:"#e0b97d"},
@@ -433,11 +427,8 @@ function spawnSolarSystem(){
     {name:"Saturn",dist:600,vel:32,color:"#ffe6a1"},
     {name:"Neptune",dist:750,vel:28,color:"#6ec6ff"},
   ];
-
   for(const p of planetData){
-    makeBody(TYPE.PLANET,{
-      x:p.dist,y:0,vx:0,vy:p.vel,m:600,name:p.name,color:p.color
-    });
+    makeBody(TYPE.PLANET,{x:p.dist,y:0,vx:0,vy:p.vel,m:600,name:p.name,color:p.color});
   }
 }
 
@@ -448,8 +439,10 @@ function spawnFamousBHs(){
   makeBody(TYPE.BH,{x:-2000,y:0,m:2e6,name:"TON 618"});
 }
 
-// UI helpers
+// Safe UI hookup
 function $(id){return document.getElementById(id);}
+function onClickSafe(id,fn){ const el=$(id); if(el) el.onclick=fn; }
+
 function syncVals(){
   $('gVal').textContent=params.G.toFixed(2);
   $('tsVal').textContent=params.dtScale.toFixed(2);
@@ -457,20 +450,20 @@ function syncVals(){
   $('mbVal').textContent=params.maxBodies;
 }
 
-// Hook UI
+// UI hooks
 $('g').oninput=e=>{params.G=parseFloat(e.target.value);syncVals();};
 $('ts').oninput=e=>{params.dtScale=parseFloat(e.target.value);syncVals();};
 $('bhg').oninput=e=>{params.BH_G_MULT=parseInt(e.target.value,10);syncVals();};
 $('labels').onchange=e=>{params.drawLabels=e.target.checked;};
 $('maxb').oninput=e=>{params.maxBodies=parseInt(e.target.value,10);syncVals();};
-$('addBH').onclick=()=>{if(bodies.length<params.maxBodies)makeBody(TYPE.BH);};
-$('addStar').onclick=()=>{if(bodies.length<params.maxBodies)makeBody(TYPE.STAR);};
-$('addPlanet').onclick=()=>{if(bodies.length<params.maxBodies)makeBody(TYPE.PLANET);};
-$('solar').onclick=spawnSolarSystem;
-$('bhPresets').onclick=spawnFamousBHs;
-$('clear').onclick=()=>{bodies.length=0;trails.length=0;};
-$('pause').onclick=()=>{params.paused=!params.paused;$('pause').textContent=params.paused?'▶️ Resume':'⏸️ Pause';};
-$('step').onclick=()=>{if(params.paused){tick(1/60);render(1/60);}};
+onClickSafe('addBH',()=>{if(bodies.length<params.maxBodies)makeBody(TYPE.BH);});
+onClickSafe('addStar',()=>{if(bodies.length<params.maxBodies)makeBody(TYPE.STAR);});
+onClickSafe('addPlanet',()=>{if(bodies.length<params.maxBodies)makeBody(TYPE.PLANET);});
+onClickSafe('solar',spawnSolarSystem);
+onClickSafe('bhPresets',spawnFamousBHs);
+onClickSafe('clear',()=>{bodies.length=0;trails.length=0;});
+onClickSafe('pause',()=>{params.paused=!params.paused;$('pause').textContent=params.paused?'▶️ Resume':'⏸️ Pause';});
+onClickSafe('step',()=>{if(params.paused){tick(1/60);render(1/60);}});
 
 // Simulation loop
 let last=performance.now();
@@ -493,6 +486,7 @@ function loop(now){
 resize();
 requestAnimationFrame(loop);
 syncVals();
+
 
 </script>
 </body>
