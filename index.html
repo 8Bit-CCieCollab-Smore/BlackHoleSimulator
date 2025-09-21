@@ -3,263 +3,159 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Tunnel Runner — Single File</title>
+<title>Black Hole Orbiter</title>
 <style>
-  html,body{margin:0;height:100%;background:#0b0f14;color:#e6f0ff;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;overflow:hidden}
-  #ui{position:fixed;inset:0;pointer-events:none}
-  .hud{position:absolute;left:16px;top:12px;opacity:.9;font-weight:600;letter-spacing:.4px}
-  .hint{position:absolute;right:16px;top:12px;opacity:.7;font-size:12px;text-align:right}
-  .center{position:absolute;left:50%;top:45%;transform:translate(-50%,-50%);text-align:center}
-  .btn{display:inline-block;margin-top:14px;padding:8px 14px;border:1px solid #94a3b8;border-radius:10px;color:#e6f0ff;text-decoration:none;font-weight:600;pointer-events:auto}
-  .btn:hover{background:#15202b}
+  html,body{margin:0;height:100%;background:black;overflow:hidden;color:white;font-family:sans-serif}
+  #ui{position:fixed;top:10px;left:10px;font-size:14px;opacity:0.8}
   canvas{display:block;width:100vw;height:100vh}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="ui">
-  <div class="hud" id="score">Score: 0</div>
-  <div class="hint">Move: WASD / Arrows<br/>Slow-mo: Space • Restart: R</div>
-  <div class="center" id="gameover" style="display:none">
-    <h1 style="margin:0 0 6px 0">Game Over</h1>
-    <div style="opacity:.8">Score: <span id="finalScore">0</span></div>
-    <a class="btn" href="#" id="restartBtn">Restart</a>
-  </div>
-</div>
-
+<div id="ui">Thrust: WASD • Time Warp: Space</div>
 <script>
-(function(){
-  const canvas = document.getElementById('c');
-  const ctx = canvas.getContext('2d');
-  const scoreEl = document.getElementById('score');
-  const overEl = document.getElementById('gameover');
-  const finalScoreEl = document.getElementById('finalScore');
-  const restartBtn = document.getElementById('restartBtn');
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+function resize(){canvas.width=innerWidth;canvas.height=innerHeight;}
+resize(); addEventListener("resize",resize);
 
-  // Resize
-  function fit(){ canvas.width = innerWidth; canvas.height = innerHeight; }
-  addEventListener('resize', fit, {passive:true}); fit();
+// --- Player (probe) ---
+const player={x:0,y:-400,vx:150,vy:0,trails:[]};
 
-  // Input
-  const keys = new Set();
-  addEventListener('keydown', e => { keys.add(e.key.toLowerCase()); if(e.key===' ') e.preventDefault(); });
-  addEventListener('keyup',   e => keys.delete(e.key.toLowerCase()));
+// --- Black Hole Parameters ---
+const BH={x:0,y:0,radius:90,gravity:120000};
 
-  // Game state
-  let running = true;
-  let time = 0;
-  let score = 0;
-  let bestZ = 0;
+// --- Time warp memory ---
+const rewindStack=[];
+let warp=false;
 
-  // Camera & player
-  const cam = { z: 0, fov: 700, x: 0, y: 0 }; // fov controls perspective strength
-  const player = { x: 0, y: 0, speed: 650, radius: 28 };
-
-  // Obstacles
-  const obstacles = [];
-  const spawn = {
-    zStart: 2600, // where new obstacles appear
-    rate: 0.6,    // obstacles per second baseline
-    t: 0
-  };
-
-  // Utility: rng
-  let seed = 1234567;
-  function rand(){ // simple LCG
-    seed = (1664525 * seed + 1013904223) >>> 0;
-    return seed / 4294967296;
-  }
-
-  // Reset/Start
-  function reset(){
-    running = true;
-    time = 0; score = 0; bestZ = 0;
-    cam.x = 0; cam.y = 0; cam.z = 0;
-    player.x = 0; player.y = 0;
-    obstacles.length = 0;
-    // prefill a few
-    for(let i=0;i<24;i++) spawnOne(i*180+900);
-    overEl.style.display = 'none';
-  }
-
-  // Spawn one obstacle at given z (distance ahead)
-  function spawnOne(z){
-    const laneSpread = 420;
-    const size = 60 + rand()*120;
-    const gap = 140 + rand()*200; // “tunnel gap”
-    // Create 3 blocks forming a gate with an opening somewhere
-    const open = Math.floor(rand()*4); // 0..3 quadrant open
-    for(let q=0; q<4; q++){
-      if(q===open) continue;
-      const sx = (q%2 ? 1 : -1) * (laneSpread * (0.55 + rand()*0.25));
-      const sy = (q<2 ? -1 : 1) * (laneSpread * (0.55 + rand()*0.25));
-      obstacles.push({ x:sx, y:sy, z: cam.z + z, size, alive:true });
-    }
-  }
-
-  // Projection 3D -> 2D
-  function project(x, y, z){
-    const dz = (z - cam.z);
-    const s = cam.fov / dz;
-    const sx = (x - cam.x) * s + canvas.width * 0.5;
-    const sy = (y - cam.y) * s + canvas.height * 0.5;
-    const r = s; // scale factor (for sizing)
-    return {sx, sy, r, dz};
-  }
-
-  // Draw cube as simple square billboard (fast + readable)
-  function drawBlock(o, alpha=1){
-    const p = project(o.x, o.y, o.z);
-    if(p.dz <= 0) return;
-    const half = o.size * p.r;
-    if(half < 1) return;
-
-    ctx.globalAlpha = Math.min(1, alpha);
-    ctx.fillStyle = '#35c2ff';
-    ctx.strokeStyle = '#86e3ff';
-    ctx.lineWidth = Math.max(1, half*0.05);
-    ctx.beginPath();
-    ctx.rect(p.sx - half, p.sy - half, half*2, half*2);
-    ctx.fill();
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
-
-  // Player reticle
-  function drawPlayer(){
-    const p = project(player.x, player.y, cam.z + 400);
-    const r = Math.max(8, player.radius * p.r * 0.5);
-    ctx.beginPath();
-    ctx.arc(p.sx, p.sy, r, 0, Math.PI*2);
-    ctx.strokeStyle = '#a7f3d0';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // center dot
-    ctx.beginPath();
-    ctx.arc(p.sx, p.sy, Math.max(2, r*0.25), 0, Math.PI*2);
-    ctx.fillStyle = '#a7f3d0';
-    ctx.fill();
-  }
-
-  // Background grid for speed feel
-  function drawGrid(){
-    const spacing = 220;
-    const lines = 10;
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-    ctx.lineWidth = 1;
-    for(let i=1; i<=lines; i++){
-      const z = cam.z + i*spacing;
-      // draw a square “ring”
-      const s = project(0,0,z).r * 700;
-      if(s <= 0.5) continue;
-      ctx.beginPath();
-      const cx = canvas.width*0.5, cy = canvas.height*0.5;
-      ctx.rect(cx - s, cy - s, s*2, s*2);
-      ctx.stroke();
-    }
-  }
-
-  // Collision check: compare player circle vs obstacle projected square near z≈cam
-  function checkCollision(o){
-    const near = o.z - cam.z;
-    if(near < 60 || near > 900) return false; // only check in a band
-    const p = project(o.x, o.y, o.z);
-    const half = o.size * p.r;
-    if(half < 1) return false;
-    const px = canvas.width*0.5;
-    const py = canvas.height*0.5;
-    const dx = Math.max(Math.abs(p.sx - px) - half, 0);
-    const dy = Math.max(Math.abs(p.sy - py) - half, 0);
-    const rr = (player.radius * p.r * 0.5);
-    return (dx*dx + dy*dy) < (rr*rr);
-  }
-
-  // Game loop
-  let last = performance.now();
-  function frame(now){
-    const realDt = Math.min(0.033, (now - last)/1000);
-    last = now;
-
-    // Slow-mo “4D” mechanic (hold Space)
-    const slow = keys.has(' ') ? 0.33 : 1.0;
-    const dt = realDt * slow;
-
-    if(running){
-      time += dt;
-      score += dt * 100 * (1 + Math.min(1, time/40)); // ramps slightly
-      cam.z += 700 * dt * (1 + Math.min(1.2, time/30)); // accelerate a bit
-      bestZ = Math.max(bestZ, cam.z);
-
-      // Input
-      const ax = (keys.has('arrowright')||keys.has('d')) - (keys.has('arrowleft')||keys.has('a'));
-      const ay = (keys.has('arrowdown') ||keys.has('s')) - (keys.has('arrowup')  ||keys.has('w'));
-      player.x += ax * player.speed * dt;
-      player.y += ay * player.speed * dt;
-      // gentle clamp
-      const bound = 520;
-      player.x = Math.max(-bound, Math.min(bound, player.x));
-      player.y = Math.max(-bound, Math.min(bound, player.y));
-
-      // Spawning
-      spawn.t += dt * (1 + time*0.03);
-      const need = spawn.rate * spawn.t;
-      if(need >= 1){
-        spawn.t = 0;
-        spawnOne(spawn.zStart);
-      }
-
-      // Update/destroy passed obstacles
-      for(let i=obstacles.length-1;i>=0;i--){
-        const o = obstacles[i];
-        if(o.z < cam.z - 50) obstacles.splice(i,1);
-      }
-
-      // Collision
-      for(const o of obstacles){
-        if(checkCollision(o)){
-          running = false;
-          finalScoreEl.textContent = Math.floor(score);
-          overEl.style.display = '';
-          break;
-        }
-      }
-    }
-
-    // Render
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    drawGrid();
-
-    // Sort by depth (far to near)
-    obstacles.sort((a,b)=> (b.z - a.z));
-    for(const o of obstacles){
-      const depth = Math.max(0, Math.min(1, (o.z - cam.z)/spawn.zStart));
-      drawBlock(o, 0.5 + 0.5*(1-depth)); // slight fade by depth
-    }
-    drawPlayer();
-
-    // HUD
-    scoreEl.textContent = `Score: ${Math.floor(score)}${keys.has(' ')?'  (SLOW-MO)':''}`;
-
-    requestAnimationFrame(frame);
-  }
-
-  // Restart handling
-  addEventListener('keydown', e => {
-    if(!running && (e.key==='r' || e.key==='R' || e.key==='Enter')){
-      reset();
-    }
+// --- Generate background stars ---
+const stars=[];
+for(let i=0;i<400;i++){
+  stars.push({
+    x:(Math.random()-0.5)*5000,
+    y:(Math.random()-0.5)*5000,
+    r:Math.random()*1.5+0.5
   });
-  restartBtn.addEventListener('click', e => { e.preventDefault(); reset(); });
+}
 
-  reset();
-  requestAnimationFrame(frame);
+// --- Input ---
+const keys=new Set();
+onkeydown=e=>{keys.add(e.key.toLowerCase()); if(e.key===" ") warp=true;}
+onkeyup=e=>{keys.delete(e.key.toLowerCase()); if(e.key===" ") warp=false;}
 
-  // —— Tips to extend into “4D” feel ——
-  // 1) Time rewind: keep a circular buffer of past player positions & cam.z; on Shift, play it backward for 1.5s.
-  // 2) Tesseract gates: replace drawBlock() with wireframe tesseract projection and require rotating its 4D angle (keys Q/E).
-  // 3) Bullet time meter: deplete a slow-mo bar; refill by near-miss distance to obstacles.
-})();
+// --- Physics step ---
+function step(dt){
+  // Save state for rewind
+  rewindStack.push(JSON.parse(JSON.stringify(player)));
+  if(rewindStack.length>240) rewindStack.shift();
+
+  if(warp && rewindStack.length>10){
+    const past=rewindStack.splice(rewindStack.length-10,1)[0];
+    Object.assign(player,past);
+    return;
+  }
+
+  // Controls
+  const thrust=200;
+  if(keys.has("w")) player.vy-=thrust*dt;
+  if(keys.has("s")) player.vy+=thrust*dt;
+  if(keys.has("a")) player.vx-=thrust*dt;
+  if(keys.has("d")) player.vx+=thrust*dt;
+
+  // Gravity from black hole
+  const dx=BH.x-player.x, dy=BH.y-player.y;
+  const dist=Math.hypot(dx,dy);
+  const force=BH.gravity/(dist*dist);
+  player.vx+=force*dx/dist*dt;
+  player.vy+=force*dy/dist*dt;
+
+  // Position update
+  player.x+=player.vx*dt;
+  player.y+=player.vy*dt;
+
+  // Add trail
+  player.trails.push({x:player.x,y:player.y,life:1});
+  if(player.trails.length>200) player.trails.shift();
+
+  // Death check
+  if(dist<BH.radius*0.9){
+    player.x=0;player.y=-400;player.vx=150;player.vy=0;
+    player.trails=[];
+  }
+}
+
+// --- Render ---
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // Stars (background distorted by BH lensing approx)
+  ctx.fillStyle="white";
+  for(const s of stars){
+    let sx=canvas.width/2+s.x/10;
+    let sy=canvas.height/2+s.y/10;
+    // crude lensing: mirror stars near BH
+    const dx=sx-canvas.width/2, dy=sy-canvas.height/2;
+    const d=Math.hypot(dx,dy);
+    if(d<200){
+      sx=canvas.width/2+dx*200/d;
+      sy=canvas.height/2+dy*200/d;
+    }
+    ctx.fillRect(sx,sy,s.r,s.r);
+  }
+
+  // Accretion disk
+  const g=ctx.createRadialGradient(canvas.width/2,canvas.height/2, BH.radius*0.9,
+                                   canvas.width/2,canvas.height/2, BH.radius*4);
+  g.addColorStop(0,"rgba(255,180,60,0.8)");
+  g.addColorStop(0.4,"rgba(255,100,0,0.7)");
+  g.addColorStop(1,"rgba(0,0,0,0)");
+  ctx.fillStyle=g;
+  ctx.beginPath();
+  ctx.ellipse(canvas.width/2,canvas.height/2, BH.radius*4, BH.radius*1.5,0,0,Math.PI*2);
+  ctx.fill();
+
+  // Black hole core
+  ctx.beginPath();
+  ctx.arc(canvas.width/2,canvas.height/2,BH.radius,0,Math.PI*2);
+  ctx.fillStyle="black";
+  ctx.fill();
+
+  // Event horizon glow
+  ctx.beginPath();
+  ctx.arc(canvas.width/2,canvas.height/2,BH.radius+3,0,Math.PI*2);
+  ctx.strokeStyle="rgba(255,255,255,0.3)";
+  ctx.lineWidth=6;
+  ctx.stroke();
+
+  // Trails
+  for(const t of player.trails){
+    const px=canvas.width/2+player.x/2+t.x/500;
+    const py=canvas.height/2+player.y/2+t.y/500;
+    ctx.fillStyle=`rgba(150,220,255,${t.life})`;
+    ctx.beginPath();ctx.arc(px,py,2,0,Math.PI*2);ctx.fill();
+    t.life-=0.02;
+  }
+
+  // Player probe
+  const px=canvas.width/2+player.x/2;
+  const py=canvas.height/2+player.y/2;
+  ctx.fillStyle="cyan";
+  ctx.beginPath();
+  ctx.arc(px,py,6,0,Math.PI*2);
+  ctx.fill();
+}
+
+// --- Loop ---
+let last=performance.now();
+function loop(now){
+  const dt=Math.min(0.03,(now-last)/1000);
+  last=now;
+  step(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+loop(last);
 </script>
 </body>
 </html>
