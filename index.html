@@ -175,7 +175,8 @@ function randomName(type){
   if(type===TYPE.STAR) return NAME.stars[(Math.random()*NAME.stars.length)|0];
   return NAME.planets[(Math.random()*NAME.planets.length)|0];
 }
-  /* ============================================================
+
+/* ============================================================
  * CHUNK 2 — Physics Upgrades
  * ============================================================ */
 
@@ -222,7 +223,7 @@ function makeBody(type,opts={}){
     locked:false,
     fading:false,
     fadeT:0,
-    disk:0 // accretion disk intensity
+    disk:0
   };
   b.r=radiusFromMass(b.m,type);
   bodies.push(b);
@@ -261,7 +262,7 @@ function gravityStep(dt){
         eater.vy=(eater.vy*eater.m+food.vy*food.m)/(eater.m+food.m);
         eater.r=radiusFromMass(eater.m,eater.type);
 
-        if(eater.type===TYPE.BH) eater.disk=1.0; // accretion disk flash
+        if(eater.type===TYPE.BH) eater.disk=1.0;
 
         toRemove.add(food.id);
       }
@@ -276,20 +277,20 @@ function gravityStep(dt){
       b.x+=b.vx*dt; b.y+=b.vy*dt;
     }
 
-    // Radiation pressure (stars push light bodies)
+    // Radiation pressure
     if(b.type===TYPE.STAR){
       for(const p of bodies){
         if(p!==b && p.type===TYPE.PLANET){
           const dx=p.x-b.x,dy=p.y-b.y,dist2=dx*dx+dy*dy;
           if(dist2<=(b.r*80)**2){
-            const f=50/dist2; // weak push
+            const f=50/dist2;
             p.vx+=dx*f*dt; p.vy+=dy*f*dt;
           }
         }
       }
     }
 
-    // Collapse: very massive star → BH
+    // Collapse
     if(b.type===TYPE.STAR && b.m>2e4){
       b.type=TYPE.BH;
       b.color='#000';
@@ -299,7 +300,7 @@ function gravityStep(dt){
     }
   }
 
-  // Remove merged bodies
+  // Remove merged
   for(let i=bodies.length-1;i>=0;i--){
     if(toRemove.has(bodies[i].id)){
       bodies.splice(i,1);
@@ -308,7 +309,6 @@ function gravityStep(dt){
   }
 }
 
-// Spaghettification check
 function spaghettiFactor(bh,body){
   const dx=body.x-bh.x,dy=body.y-bh.y;
   const dist=Math.sqrt(dx*dx+dy*dy);
@@ -326,20 +326,17 @@ function drawBody(b,dt){
     ctx.fillStyle='#000';
     ctx.beginPath();ctx.arc(0,0,R,0,TAU);ctx.fill();
 
-    // Photon ring
     ctx.strokeStyle='#9be1ff';
     ctx.globalAlpha=0.7;
     ctx.lineWidth=1.5;
     ctx.beginPath();ctx.arc(0,0,R*1.05,0,TAU);ctx.stroke();
 
-    // Shimmer rings
     for(let i=0;i<3;i++){
       const rr=R*(1.2+i*0.15);
       ctx.strokeStyle=`rgba(150,200,255,${0.12-i*0.03})`;
       ctx.beginPath();ctx.arc(0,0,rr,0,TAU);ctx.stroke();
     }
 
-    // Accretion disk
     if(b.disk>0){
       const grad=ctx.createRadialGradient(0,0,R*0.8,0,0,R*4);
       grad.addColorStop(0,'rgba(255,180,100,0.7)');
@@ -364,11 +361,10 @@ function drawBody(b,dt){
 
   } else {
     let R=b.r*cam.z;
-    R=Math.min(R,100); // cap radius so it never crashes
+    R=Math.min(R,100);
     ctx.fillStyle=b.color;
     ctx.beginPath();ctx.arc(0,0,R,0,TAU);ctx.fill();
 
-    // Spaghettification
     for(const bh of bodies){
       if(bh.type===TYPE.BH){
         const f=spaghettiFactor(bh,b);
@@ -390,7 +386,7 @@ function drawBody(b,dt){
  * CHUNK 3 — Presets + Extras (Safe Version)
  * ============================================================ */
 
-const C = 300; // arbitrary max velocity
+const C = 300;
 
 function applyRelativity(b){
   const v = Math.hypot(b.vx,b.vy);
@@ -415,7 +411,6 @@ gravityStep = function(dt){
   for(const b of bodies){ applyRelativity(b); }
 };
 
-// Presets
 function spawnSolarSystem(){
   bodies.length=0; trails.length=0;
   const sun = makeBody(TYPE.STAR,{x:0,y:0,m:15000,vx:0,vy:0,name:"Sun",color:"#ffd27f"});
@@ -441,9 +436,12 @@ function spawnFamousBHs(){
   makeBody(TYPE.BH,{x:-2000,y:0,m:2e6,name:"TON 618"});
 }
 
-// Safe UI hookup
 function $(id){return document.getElementById(id);}
-function onClickSafe(id,fn){ const el=$(id); if(el) el.onclick=fn; }
+function onClickSafe(id,fn){
+  const el=$(id);
+  if(el) el.onclick=fn;
+  else console.warn("Missing button:",id);
+}
 
 function syncVals(){
   $('gVal').textContent=params.G.toFixed(2);
@@ -452,7 +450,6 @@ function syncVals(){
   $('mbVal').textContent=params.maxBodies;
 }
 
-// UI hooks
 $('g').oninput=e=>{params.G=parseFloat(e.target.value);syncVals();};
 $('ts').oninput=e=>{params.dtScale=parseFloat(e.target.value);syncVals();};
 $('bhg').oninput=e=>{params.BH_G_MULT=parseInt(e.target.value,10);syncVals();};
@@ -466,6 +463,29 @@ onClickSafe('bhPresets',spawnFamousBHs);
 onClickSafe('clear',()=>{bodies.length=0;trails.length=0;});
 onClickSafe('pause',()=>{params.paused=!params.paused;$('pause').textContent=params.paused?'▶️ Resume':'⏸️ Pause';});
 onClickSafe('step',()=>{if(params.paused){tick(1/60);render(1/60);}});
+
+// Grid renderer
+function drawGrid(){
+  const spacing = 200;
+  ctx.strokeStyle = "rgba(255,255,255,0.05)";
+  ctx.lineWidth = 1;
+
+  const startX = Math.floor((cam.x - W/2/cam.z)/spacing)*spacing;
+  const endX   = Math.floor((cam.x + W/2/cam.z)/spacing)*spacing;
+  const startY = Math.floor((cam.y - H/2/cam.z)/spacing)*spacing;
+  const endY   = Math.floor((cam.y + H/2/cam.z)/spacing)*spacing;
+
+  for(let x=startX; x<=endX; x+=spacing){
+    const [sx1,sy1] = toScreen(x,startY);
+    const [sx2,sy2] = toScreen(x,endY);
+    ctx.beginPath(); ctx.moveTo(sx1,sy1); ctx.lineTo(sx2,sy2); ctx.stroke();
+  }
+  for(let y=startY; y<=endY; y+=spacing){
+    const [sx1,sy1] = toScreen(startX,y);
+    const [sx2,sy2] = toScreen(endX,y);
+    ctx.beginPath(); ctx.moveTo(sx1,sy1); ctx.lineTo(sx2,sy2); ctx.stroke();
+  }
+}
 
 // Simulation loop
 let last=performance.now();
@@ -488,8 +508,6 @@ function loop(now){
 resize();
 requestAnimationFrame(loop);
 syncVals();
-
-
 </script>
 </body>
 </html>
