@@ -384,6 +384,116 @@ function drawBody(b,dt){
   ctx.restore();
 }
 
+  /* ============================================================
+ * CHUNK 3 — Presets + Extras
+ * ============================================================ */
+
+// Speed of light cap
+const C = 300; // arbitrary max velocity
+
+// Limit velocities + doppler tint
+function applyRelativity(b){
+  const v = Math.hypot(b.vx,b.vy);
+  if(v > C){
+    b.vx *= C/v;
+    b.vy *= C/v;
+  }
+  // Doppler tint for planets/stars
+  if(b.type !== TYPE.BH){
+    const shift = v / C; // 0..1
+    if(shift > 0.05){
+      // Shift towards blue if moving left, red if right
+      const dir = b.vx > 0 ? 1 : -1;
+      const amt = Math.min(shift*0.7,0.5);
+      if(dir>0) b.color = `rgba(${255},${Math.floor(255*(1-amt))},${Math.floor(255*(1-amt))},1)`;
+      else b.color = `rgba(${Math.floor(255*(1-amt))},${Math.floor(255*(1-amt))},255,1)`;
+    }
+  }
+}
+
+// Apply relativity each step
+const oldGravityStep = gravityStep;
+gravityStep = function(dt){
+  oldGravityStep(dt);
+  for(const b of bodies){ applyRelativity(b); }
+};
+
+// Presets
+function spawnSolarSystem(){
+  bodies.length=0; trails.length=0;
+  const sun = makeBody(TYPE.STAR,{x:0,y:0,m:15000,vx:0,vy:0,name:"Sun",color:"#ffd27f"});
+  sun.locked=true;
+
+  const planetData = [
+    {name:"Mercury",dist:100,vel:90,color:"#aaa"},
+    {name:"Venus",dist:160,vel:70,color:"#e0b97d"},
+    {name:"Earth",dist:220,vel:60,color:"#6ab7ff"},
+    {name:"Mars",dist:300,vel:50,color:"#ff6e5f"},
+    {name:"Jupiter",dist:450,vel:40,color:"#ffb870"},
+    {name:"Saturn",dist:600,vel:32,color:"#ffe6a1"},
+    {name:"Neptune",dist:750,vel:28,color:"#6ec6ff"},
+  ];
+
+  for(const p of planetData){
+    makeBody(TYPE.PLANET,{
+      x:p.dist,y:0,vx:0,vy:p.vel,m:600,name:p.name,color:p.color
+    });
+  }
+}
+
+function spawnFamousBHs(){
+  bodies.length=0; trails.length=0;
+  makeBody(TYPE.BH,{x:0,y:0,m:4e5,name:"Sagittarius A*"});
+  makeBody(TYPE.BH,{x:2000,y:0,m:8e5,name:"Cygnus X-1"});
+  makeBody(TYPE.BH,{x:-2000,y:0,m:2e6,name:"TON 618"});
+}
+
+// UI helpers
+function $(id){return document.getElementById(id);}
+function syncVals(){
+  $('gVal').textContent=params.G.toFixed(2);
+  $('tsVal').textContent=params.dtScale.toFixed(2);
+  $('bhgVal').textContent=params.BH_G_MULT;
+  $('mbVal').textContent=params.maxBodies;
+}
+
+// Hook UI
+$('g').oninput=e=>{params.G=parseFloat(e.target.value);syncVals();};
+$('ts').oninput=e=>{params.dtScale=parseFloat(e.target.value);syncVals();};
+$('bhg').oninput=e=>{params.BH_G_MULT=parseInt(e.target.value,10);syncVals();};
+$('labels').onchange=e=>{params.drawLabels=e.target.checked;};
+$('maxb').oninput=e=>{params.maxBodies=parseInt(e.target.value,10);syncVals();};
+$('addBH').onclick=()=>{if(bodies.length<params.maxBodies)makeBody(TYPE.BH);};
+$('addStar').onclick=()=>{if(bodies.length<params.maxBodies)makeBody(TYPE.STAR);};
+$('addPlanet').onclick=()=>{if(bodies.length<params.maxBodies)makeBody(TYPE.PLANET);};
+$('solar').onclick=spawnSolarSystem;
+$('bhPresets').onclick=spawnFamousBHs;
+$('clear').onclick=()=>{bodies.length=0;trails.length=0;};
+$('pause').onclick=()=>{params.paused=!params.paused;$('pause').textContent=params.paused?'▶️ Resume':'⏸️ Pause';};
+$('step').onclick=()=>{if(params.paused){tick(1/60);render(1/60);}};
+
+// Simulation loop
+let last=performance.now();
+function tick(dt){ gravityStep(dt); }
+function render(dt){
+  ctx.clearRect(0,0,W,H);
+  drawBackground();
+  drawGrid();
+  for(const b of bodies) drawBody(b,dt);
+}
+function loop(now){
+  const dt=((now-last)/1000)*(params.paused?0:params.dtScale);
+  last=now;
+  if(!params.paused){
+    tick(dt);
+    render(dt);
+  }
+  requestAnimationFrame(loop);
+}
+resize();
+requestAnimationFrame(loop);
+syncVals();
+
 </script>
 </body>
 </html>
