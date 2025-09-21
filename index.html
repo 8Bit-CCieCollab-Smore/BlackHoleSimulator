@@ -173,6 +173,217 @@ function randomName(type){
   if(type===TYPE.STAR) return NAME.stars[(Math.random()*NAME.stars.length)|0];
   return NAME.planets[(Math.random()*NAME.planets.length)|0];
 }
+  /* ============================================================
+ * CHUNK 2 — Physics Upgrades
+ * ============================================================ */
+
+const params={
+  G:0.6,
+  dtScale:1.0,
+  BH_G_MULT:10,
+  maxBodies:150,
+  drawLabels:true,
+  paused:false
+};
+
+const bodies=[];
+const trails=[];
+
+// Radius from mass
+function radiusFromMass(m,type){
+  if(type===TYPE.BH) return Math.max(3,Math.pow(m,0.22));
+  if(type===TYPE.STAR) return Math.max(2,Math.pow(m,0.35));
+  return Math.max(2,Math.pow(m,0.33));
+}
+
+// Make body
+function makeBody(type,opts={}){
+  const b={
+    id:Math.random().toString(36).slice(2),
+    type,
+    x:opts.x??cam.x+rand(-200,200)/cam.z,
+    y:opts.y??cam.y+rand(-200,200)/cam.z,
+    vx:opts.vx??rand(-20,20),
+    vy:opts.vy??rand(-20,20),
+    m:opts.m??(
+      type===TYPE.BH?rand(4e4,12e4):
+      type===TYPE.STAR?rand(3e3,1.5e4):
+      rand(80,800)
+    ),
+    r:0,
+    name:opts.name??randomName(type),
+    color:opts.color??(
+      type===TYPE.STAR?pickStarColor():
+      planetPalette[(Math.random()*planetPalette.length)|0]
+    ),
+    acc:{x:0,y:0},
+    locked:false,
+    fading:false,
+    fadeT:0,
+    disk:0 // accretion disk intensity
+  };
+  b.r=radiusFromMass(b.m,type);
+  bodies.push(b);
+  trails.push([]);
+  return b;
+}
+
+// Gravity + physics
+function gravityStep(dt){
+  for(const b of bodies){b.acc.x=0;b.acc.y=0;}
+  const toRemove=new Set();
+
+  for(let i=0;i<bodies.length;i++){
+    const bi=bodies[i];
+    for(let j=i+1;j<bodies.length;j++){
+      const bj=bodies[j];
+      if(!bi||!bj) continue;
+
+      const dx=bj.x-bi.x,dy=bj.y-bi.y;
+      const d2=dx*dx+dy*dy+25,d=Math.sqrt(d2);
+
+      // Gravity
+      let G=params.G;
+      if(bi.type===TYPE.BH||bj.type===TYPE.BH) G*=params.BH_G_MULT;
+      const f=G*bi.m*bj.m/d2,fx=f*dx/d,fy=f*dy/d;
+      bi.acc.x+=fx/bi.m; bi.acc.y+=fy/bi.m;
+      bj.acc.x-=fx/bj.m; bj.acc.y-=fy/bj.m;
+
+      // Collision / merge
+      if(d<Math.max(bi.r,bj.r)*0.85){
+        const eater=(bi.type===TYPE.BH||bi.m>=bj.m)?bi:bj;
+        const food=(eater===bi?bj:bi);
+
+        eater.m+=food.m;
+        eater.vx=(eater.vx*eater.m+food.vx*food.m)/(eater.m+food.m);
+        eater.vy=(eater.vy*eater.m+food.vy*food.m)/(eater.m+food.m);
+        eater.r=radiusFromMass(eater.m,eater.type);
+
+        if(eater.type===TYPE.BH) eater.disk=1.0; // accretion disk flash
+
+        toRemove.add(food.id);
+      }
+    }
+  }
+
+  // Move
+  for(const b of bodies){
+    b.vx+=b.acc.x*dt;
+    b.vy+=b.acc.y*dt;
+    if(!b.locked){
+      b.x+=b.vx*dt; b.y+=b.vy*dt;
+    }
+
+    // Radiation pressure (stars push light bodies)
+    if(b.type===TYPE.STAR){
+      for(const p of bodies){
+        if(p!==b && p.type===TYPE.PLANET){
+          const dx=p.x-b.x,dy=p.y-b.y,dist2=dx*dx+dy*dy;
+          if(dist2<=(b.r*80)**2){
+            const f=50/dist2; // weak push
+            p.vx+=dx*f*dt; p.vy+=dy*f*dt;
+          }
+        }
+      }
+    }
+
+    // Collapse: very massive star → BH
+    if(b.type===TYPE.STAR && b.m>2e4){
+      b.type=TYPE.BH;
+      b.color='#000';
+      b.r=radiusFromMass(b.m,TYPE.BH);
+      b.name="Collapsed Star";
+      b.disk=1.0;
+    }
+  }
+
+  // Remove merged bodies
+  for(let i=bodies.length-1;i>=0;i--){
+    if(toRemove.has(bodies[i].id)){
+      bodies.splice(i,1);
+      trails.splice(i,1);
+    }
+  }
+}
+
+// Spaghettification check
+function spaghettiFactor(bh,body){
+  const dx=body.x-bh.x,dy=body.y-bh.y;
+  const dist=Math.sqrt(dx*dx+dy*dy);
+  if(dist<bh.r*8) return Math.min(1,(bh.r*8-dist)/(bh.r*8));
+  return 0;
+}
+
+// Rendering bodies
+function drawBody(b,dt){
+  const [sx,sy]=toScreen(b.x,b.y);
+  ctx.save(); ctx.translate(sx,sy);
+
+  if(b.type===TYPE.BH){
+    const R=b.r*cam.z;
+    ctx.fillStyle='#000';
+    ctx.beginPath();ctx.arc(0,0,R,0,TAU);ctx.fill();
+
+    // Photon ring
+    ctx.strokeStyle='#9be1ff';
+    ctx.globalAlpha=0.7;
+    ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.arc(0,0,R*1.05,0,TAU);ctx.stroke();
+
+    // Shimmer rings
+    for(let i=0;i<3;i++){
+      const rr=R*(1.2+i*0.15);
+      ctx.strokeStyle=`rgba(150,200,255,${0.12-i*0.03})`;
+      ctx.beginPath();ctx.arc(0,0,rr,0,TAU);ctx.stroke();
+    }
+
+    // Accretion disk
+    if(b.disk>0){
+      const grad=ctx.createRadialGradient(0,0,R*0.8,0,0,R*4);
+      grad.addColorStop(0,'rgba(255,180,100,0.7)');
+      grad.addColorStop(1,'rgba(255,0,0,0)');
+      ctx.globalAlpha=b.disk;
+      ctx.fillStyle=grad;
+      ctx.beginPath();ctx.arc(0,0,R*4,0,TAU);ctx.fill();
+      ctx.globalAlpha=1;
+      b.disk=Math.max(0,b.disk-dt*0.5);
+    }
+
+  } else if(b.type===TYPE.STAR){
+    const R=b.r*cam.z;
+    const grd=ctx.createRadialGradient(0,0,R*0.35,0,0,R*1.8);
+    grd.addColorStop(0,'#fff6d6');
+    grd.addColorStop(0.25,b.color);
+    grd.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=grd;
+    ctx.beginPath();ctx.arc(0,0,R*1.8,0,TAU);ctx.fill();
+    ctx.fillStyle='#fff';
+    ctx.beginPath();ctx.arc(0,0,R*0.8,0,TAU);ctx.fill();
+
+  } else {
+    let R=b.r*cam.z;
+    R=Math.min(R,100); // cap radius so it never crashes
+    ctx.fillStyle=b.color;
+    ctx.beginPath();ctx.arc(0,0,R,0,TAU);ctx.fill();
+
+    // Spaghettification
+    for(const bh of bodies){
+      if(bh.type===TYPE.BH){
+        const f=spaghettiFactor(bh,b);
+        if(f>0){
+          ctx.scale(1+f*1.5,1-f*0.5);
+        }
+      }
+    }
+
+    ctx.globalAlpha=0.6;
+    ctx.fillStyle='#fff';
+    ctx.beginPath();ctx.arc(-R*0.3,-R*0.3,R*0.3,0,TAU);ctx.fill();
+  }
+
+  ctx.restore();
+}
+
 </script>
 </body>
 </html>
