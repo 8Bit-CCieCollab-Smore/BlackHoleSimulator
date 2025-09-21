@@ -3,16 +3,15 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>2D Black Hole Simulator — Canvas 2D (single file)</title>
+<title>Black Hole + Gravity (Canvas 2D, single file)</title>
 <style>
   :root{
-    --bg0:#0c0b12; --bg1:#161427; --bg2:#25244a; --bg3:#3a4372; --bg4:#5e6aa0;
-    --panel:#0d1022cc; --text:#eef2ff; --muted:#aab2d6; --accent:#87d2ff; --accent2:#b18cff;
+    --panel:#0d1022cc; --text:#eef2ff; --muted:#aab2d6;
   }
-  html,body{margin:0;height:100%;background:#0a0b12;color:var(--text);font:14px/1.2 system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;overflow:hidden}
+  html,body{margin:0;height:100%;background:#0b0c13;color:var(--text);font:14px/1.2 system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;overflow:hidden}
   #wrap{position:fixed;inset:0}
   canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
-  #ui{position:absolute;top:12px;left:12px;width:320px;max-height:88vh;overflow:auto;
+  #ui{position:absolute;top:12px;left:12px;width:340px;max-height:88vh;overflow:auto;
       background:var(--panel);backdrop-filter:blur(6px);border:1px solid #1b2140;border-radius:16px;
       box-shadow:0 10px 30px #0008;padding:12px}
   #ui h1{font-size:16px;margin:0 0 8px}
@@ -23,7 +22,7 @@
   label{color:var(--muted)}
   small{color:var(--muted)}
   #fps{color:var(--muted)}
-  .nameTag{position:absolute;pointer-events:none;color:#eef2ff;text-shadow:0 0 6px #000,0 0 12px #000;font-weight:600}
+  .nameTag{position:absolute;pointer-events:none;color:#eef2ff;text-shadow:0 0 6px #000,0 0 12px #000;font-weight:700}
 </style>
 </head>
 <body>
@@ -31,7 +30,7 @@
   <canvas id="c"></canvas>
 
   <div id="ui">
-    <h1>🌀 Black Hole + Gravity (2D)</h1>
+    <h1>🌀 Black Hole + Orbits (2D)</h1>
     <div class="grid">
       <button id="addBH">+ Black Hole</button>
       <button id="addStar">+ Star</button>
@@ -41,13 +40,15 @@
       <button id="reset">♻️ Reset View</button>
     </div>
 
-    <div class="row"><label>Gravity G: <b id="gVal"></b></label><input id="g" type="range" min="0.1" max="2.0" step="0.001"></div>
+    <div class="row"><label>Gravity G: <b id="gVal"></b></label><input id="g" type="range" min="0.15" max="2.0" step="0.001"></div>
     <div class="row"><label>Time Scale: <b id="tsVal"></b></label><input id="ts" type="range" min="0.2" max="2.5" step="0.01"></div>
-    <div class="row"><label>Tidal Strength: <b id="tidVal"></b></label><input id="tid" type="range" min="0.2" max="3.0" step="0.01"></div>
+    <div class="row"><label>Spaghettification Zone ×R<sub>s</sub>: <b id="zoneVal"></b></label><input id="zone" type="range" min="2" max="12" step="0.1"></div>
+    <div class="row"><label>Max Stretch: <b id="stretchVal"></b></label><input id="stretch" type="range" min="1.0" max="5.0" step="0.05"></div>
+    <div class="row"><label>Lensing Strength: <b id="lensVal"></b></label><input id="lens" type="range" min="0.6" max="2.2" step="0.02"></div>
     <div class="row"><label>Trails</label><input id="trails" type="checkbox"></div>
     <div class="row"><label>Labels</label><input id="labels" type="checkbox" checked></div>
     <div class="row"><label>Max Bodies: <b id="mbVal"></b></label><input id="maxb" type="range" min="10" max="300" step="10"></div>
-    <div class="row"><small>Shift+Drag a body to move it • Scroll over a body to adjust mass</small></div>
+    <div class="row"><small>Controls: Left-drag empty = pan • Wheel = zoom (cursor-centered) • Shift+drag a body to move it • Wheel on body = mass</small></div>
     <div class="row"><span id="fps">FPS</span></div>
   </div>
 </div>
@@ -58,10 +59,7 @@
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d', { alpha:false });
   const DPR = Math.max(1, Math.min(2, window.devicePixelRatio||1));
-  let W=0, H=0, CX=0, CY=0;
-
-  const bg = document.createElement('canvas'); // stable background layer
-  const bgctx = bg.getContext('2d');
+  let W=0, H=0;
 
   function resize(){
     W = Math.floor(window.innerWidth);
@@ -71,13 +69,152 @@
     canvas.style.width = W+'px';
     canvas.style.height = H+'px';
     ctx.setTransform(DPR,0,0,DPR,0,0);
-
-    bg.width = W; bg.height = H;
-    drawStableBackground();
-
-    CX=W/2; CY=H/2;
+    rebuildBackground();
   }
   window.addEventListener('resize', resize);
+
+  // ========= Camera (no wrap; infinite space) =========
+  const cam = {
+    x: 0, y: 0, // world coords at screen center
+    z: 1.0      // zoom (pixels per world unit)
+  };
+  const toScreen = (wx,wy)=>[(wx-cam.x)*cam.z + W/2, (wy-cam.y)*cam.z + H/2];
+  const toWorld  = (sx,sy)=>[(sx - W/2)/cam.z + cam.x, (sy - H/2)/cam.z + cam.y];
+
+  // Zoom (cursor-centered)
+  canvas.addEventListener('wheel', e=>{
+    const zoomFactor = Math.exp(-e.deltaY*0.0015);
+    const [wx,wy] = toWorld(e.clientX, e.clientY);
+    cam.z = Math.max(0.2, Math.min(4.0, cam.z*zoomFactor));
+    // keep cursor position stable in world space
+    const [wx2,wy2] = toWorld(e.clientX, e.clientY);
+    cam.x += (wx - wx2);
+    cam.y += (wy - wy2);
+    e.preventDefault();
+  }, {passive:false});
+
+  // Pan
+  let panning=false, panStart=[0,0], camStart=[0,0];
+  canvas.addEventListener('pointerdown', e=>{
+    if(e.buttons===1){ // left
+      // if we're not shift-dragging a body (handled later), pan
+      panning=true; panStart=[e.clientX,e.clientY]; camStart=[cam.x,cam.y];
+      canvas.setPointerCapture(e.pointerId);
+    }
+  });
+  canvas.addEventListener('pointermove', e=>{
+    if(panning){
+      const dx = (e.clientX - panStart[0]) / cam.z;
+      const dy = (e.clientY - panStart[1]) / cam.z;
+      cam.x = camStart[0] - dx;
+      cam.y = camStart[1] - dy;
+    }
+  });
+  canvas.addEventListener('pointerup', ()=>{ panning=false; });
+
+  // ========= Procedural Background (detailed → lensing visible) =========
+  // We'll render the **world background** (nebula + stars + grid) to an offscreen canvas each frame,
+  // using the camera to pick the portion of an infinite tiling.
+  const bgTile = document.createElement('canvas'); // single tile
+  const bgctx = bgTile.getContext('2d');
+  const TILE = 1024; // tile size in world px (pre-zoom)
+  bgTile.width = TILE; bgTile.height = TILE;
+
+  function perlin2D(x,y,seed){
+    const n = Math.sin(x*12.9898 + y*78.233 + seed)*43758.5453;
+    return n - Math.floor(n);
+  }
+  function rebuildBackground(){
+    // deep purple/blue gradient base per tile
+    const g = bgctx.createRadialGradient(TILE*0.65,TILE*0.35, 40, TILE*0.5,TILE*0.5, Math.hypot(TILE,TILE)*0.9);
+    g.addColorStop(0.00, '#3f3a6b');
+    g.addColorStop(0.35, '#2b2f56');
+    g.addColorStop(0.72, '#171a2a');
+    g.addColorStop(1.00, '#0b0c13');
+    bgctx.fillStyle=g; bgctx.fillRect(0,0,TILE,TILE);
+
+    // faint nebula blotches
+    const img = bgctx.getImageData(0,0,TILE,TILE);
+    const d = img.data;
+    for(let y=0;y<TILE;y++){
+      for(let x=0;x<TILE;x++){
+        const p = perlin2D(x*0.008, y*0.008, 12.3);
+        const i = (y*TILE+x)*4;
+        // add bluish/purple fog
+        d[i  ] = Math.min(255, d[i  ] + p*20);
+        d[i+1] = Math.min(255, d[i+1] + p*16);
+        d[i+2] = Math.min(255, d[i+2] + p*28);
+      }
+    }
+    bgctx.putImageData(img,0,0);
+
+    // sprinkle varied stars
+    bgctx.save();
+    for(let i=0;i<400;i++){
+      const x=(Math.random()*TILE)|0, y=(Math.random()*TILE)|0;
+      const r=Math.random()*1.3;
+      const a=0.18+Math.random()*0.6;
+      bgctx.globalAlpha=a;
+      bgctx.fillStyle= Math.random()<0.7 ? '#e8edff' : '#c7d2ff';
+      bgctx.beginPath(); bgctx.arc(x,y,r,0,Math.PI*2); bgctx.fill();
+    }
+    bgctx.restore();
+  }
+
+  // draw tiled background for current camera view
+  function drawBackground(){
+    const sx = cam.x - W/(2*cam.z);
+    const sy = cam.y - H/(2*cam.z);
+    const ex = cam.x + W/(2*cam.z);
+    const ey = cam.y + H/(2*cam.z);
+    const x0 = Math.floor(sx / TILE) * TILE;
+    const y0 = Math.floor(sy / TILE) * TILE;
+
+    for(let y=y0; y<ey; y+=TILE){
+      for(let x=x0; x<ex; x+=TILE){
+        const [s0x,s0y] = toScreen(x,y);
+        ctx.drawImage(bgTile, s0x, s0y, TILE*cam.z, TILE*cam.z);
+      }
+    }
+  }
+
+  // ========= World Grid (distorted by lensing later) =========
+  function drawGrid(){
+    // choose a nice spacing based on zoom
+    const base = 100; // world units
+    const scales = [0.25,0.5,1,2,4,8,16,32];
+    let step = base;
+    for(const s of scales){ if(base*s*cam.z>60){ step=base*s; break; } }
+    ctx.save();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(200,210,240,0.12)';
+    // draw verticals
+    const sx = cam.x - W/(2*cam.z), ex = cam.x + W/(2*cam.z);
+    const sy = cam.y - H/(2*cam.z), ey = cam.y + H/(2*cam.z);
+    const x0 = Math.floor(sx/step)*step, y0 = Math.floor(sy/step)*step;
+
+    for(let x=x0; x<ex; x+=step){
+      const a = Math.abs(Math.round(x))% (step*5)===0 ? 0.22 : 0.12;
+      ctx.strokeStyle = `rgba(200,210,240,${a})`;
+      const [sx0,sy0] = toScreen(x, sy), [sx1,sy1] = toScreen(x, ey);
+      ctx.beginPath(); ctx.moveTo(sx0,sy0); ctx.lineTo(sx1,sy1); ctx.stroke();
+    }
+    for(let y=y0; y<ey; y+=step){
+      const a = Math.abs(Math.round(y))% (step*5)===0 ? 0.22 : 0.12;
+      ctx.strokeStyle = `rgba(200,210,240,${a})`;
+      const [sx0,sy0] = toScreen(sx, y), [sx1,sy1] = toScreen(ex, y);
+      ctx.beginPath(); ctx.moveTo(sx0,sy0); ctx.lineTo(sx1,sy1); ctx.stroke();
+    }
+
+    // origin crosshair
+    ctx.strokeStyle='rgba(255,255,255,0.28)';
+    ctx.lineWidth=1.2;
+    const [ox0,oy0]=toScreen(0,sy), [ox1,oy1]=toScreen(0,ey);
+    ctx.beginPath(); ctx.moveTo(ox0,oy0); ctx.lineTo(ox1,oy1); ctx.stroke();
+    const [ox2,oy2]=toScreen(sx,0), [ox3,oy3]=toScreen(ex,0);
+    ctx.beginPath(); ctx.moveTo(ox2,oy2); ctx.lineTo(ox3,oy3); ctx.stroke();
+    ctx.restore();
+  }
 
   // ========= Names / Colors =========
   const NAME = {
@@ -105,42 +242,27 @@
     return planetPalette[(Math.random()*planetPalette.length)|0];
   }
 
-  // ========= Background (static, no crazy motion) =========
-  function drawStableBackground(){
-    const g = bgctx.createRadialGradient(W*0.65,H*0.35, 40, W*0.5,H*0.5, Math.hypot(W,H)*0.9);
-    g.addColorStop(0.00, '#3f3a6b'); // muted purple
-    g.addColorStop(0.35, '#2b2f56'); // indigo/blue
-    g.addColorStop(0.72, '#171a2a'); // deep gray-blue
-    g.addColorStop(1.00, '#0b0c13'); // near black
-    bgctx.fillStyle=g; bgctx.fillRect(0,0,W,H);
-
-    // very faint, still stars (no movement)
-    bgctx.save();
-    bgctx.globalAlpha=0.28;
-    bgctx.fillStyle='#cfd7ff';
-    for(let i=0;i<220;i++){
-      const x=(Math.random()*W)|0, y=(Math.random()*H)|0, r=Math.random()*1.2;
-      bgctx.beginPath(); bgctx.arc(x,y,r,0,TAU); bgctx.fill();
-    }
-    bgctx.restore();
-  }
-
   // ========= Physics =========
   const params = {
     G: 0.6,
     dtScale: 1.0,
-    tidalK: 1.25,   // visual spaghettification strength
+    zoneMult: 6.0,     // spaghettification zone = zoneMult * BH radius
+    maxStretch: 3.2,   // max elongation inside zone
+    lensing: 1.1,      // how strong annulus magnifies
     drawTrails: false,
     drawLabels: true,
     maxBodies: 150
   };
 
-  const bodies = [];             // dynamic bodies
-  const trails = [];             // per-body trail
+  const bodies = [];
+  const trails = [];
   const MAX_TRAIL = 80;
 
+  // Accretion disks (per BH id)
+  const disks = new Map(); // id -> {power,angle}
+
   function radiusFromMass(m, type){
-    if(type===TYPE.BH)   return Math.max(4, Math.sqrt(m)/10);   // pseudo Schwarzschild scale
+    if(type===TYPE.BH)   return Math.max(4, Math.sqrt(m)/10);   // pseudo Rs
     if(type===TYPE.STAR) return Math.max(2, Math.pow(m,0.35));
     return Math.max(2, Math.pow(m,0.33));
   }
@@ -149,8 +271,8 @@
     const b = {
       id: Math.random().toString(36).slice(2),
       type,
-      x: opts.x ?? rand(W*0.25, W*0.75),
-      y: opts.y ?? rand(H*0.25, H*0.75),
+      x: opts.x ?? rand(-200,200),
+      y: opts.y ?? rand(-200,200),
       vx: opts.vx ?? rand(-30,30),
       vy: opts.vy ?? rand(-30,30),
       m:  opts.m ?? (type===TYPE.BH ? rand(2e4, 8e4) : type===TYPE.STAR ? rand(3e3, 1.5e4) : rand(50,700)),
@@ -159,32 +281,31 @@
       color: opts.color ?? pickColor(type),
       acc: {x:0,y:0},
       locked:false,
-      fading:false, fadeT:0 // for accretion dissolve
+      fading:false, fadeT:0
     };
     b.r = radiusFromMass(b.m, type);
     bodies.push(b); trails.push([]);
+    if(type===TYPE.BH) disks.set(b.id, {power:0, angle:0});
     return b;
   }
 
   function gravityStep(dt){
-    // Reset accelerations
     for(const b of bodies){ b.acc.x=0; b.acc.y=0; }
 
-    // Pairwise forces; collect merges to apply after
-    const toMerge = []; // [eaterIndex, foodIndex]
+    const toMerge=[];
     for(let i=0;i<bodies.length;i++){
-      const bi = bodies[i];
+      const bi=bodies[i];
       for(let j=i+1;j<bodies.length;j++){
-        const bj = bodies[j];
+        const bj=bodies[j];
         const dx=bj.x-bi.x, dy=bj.y-bi.y;
-        const d2=dx*dx+dy*dy + 25; // softening
+        const d2=dx*dx+dy*dy + 25;
         const d=Math.sqrt(d2);
         const f = params.G*bi.m*bj.m/d2;
-        const fx = f*dx/d, fy=f*dy/d;
+        const fx=f*dx/d, fy=f*dy/d;
         bi.acc.x += fx/bi.m; bi.acc.y += fy/bi.m;
         bj.acc.x -= fx/bj.m; bj.acc.y -= fy/bj.m;
 
-        // Accretion criterion (BH eats when inside horizon)
+        // Accretion when BH horizon reached
         if((bi.type===TYPE.BH || bj.type===TYPE.BH) && d < Math.max(bi.r,bj.r)*0.85){
           const eater = (bi.type===TYPE.BH) ? i : j;
           const food  = (bi.type===TYPE.BH) ? j : i;
@@ -193,276 +314,280 @@
       }
     }
 
-    // Integrate
     for(const b of bodies){
-      b.vx += b.acc.x * dt;
-      b.vy += b.acc.y * dt;
+      b.vx += b.acc.x * dt; b.vy += b.acc.y * dt;
       if(!b.locked){ b.x += b.vx * dt; b.y += b.vy * dt; }
-
-      // Edge behavior: wrap
-      if(b.x<0) b.x+=W; if(b.x>W) b.x-=W;
-      if(b.y<0) b.y+=H; if(b.y>H) b.y-=H;
+      // no wrap: free space
     }
 
-    // Apply merges AFTER forces/integration to avoid freeze
+    // Apply merges & trigger disks
     if(toMerge.length){
-      // sort unique foods to remove safely
-      const foods = new Set(toMerge.map(p=>p[1]));
-      // merge each pair
       for(const [ei,fi] of toMerge){
-        const eater = bodies[ei], food = bodies[fi];
-        if(!eater || !food) continue; // already merged
-        if(eater === food) continue;
-        const totalM = eater.m + food.m;
-        eater.vx = (eater.vx*eater.m + food.vx*food.m)/totalM;
-        eater.vy = (eater.vy*eater.m + food.vy*food.m)/totalM;
-        eater.m = totalM;
-        eater.r = radiusFromMass(eater.m, eater.type);
-        // mark food to dissolve
-        food.fading = true;
-        food.fadeT = 0;
+        const eater=bodies[ei], food=bodies[fi];
+        if(!eater||!food||eater===food) continue;
+        const totalM=eater.m+food.m;
+        eater.vx=(eater.vx*eater.m + food.vx*food.m)/totalM;
+        eater.vy=(eater.vy*eater.m + food.vy*food.m)/totalM;
+        eater.m=totalM; eater.r=radiusFromMass(eater.m,eater.type);
+        // disk boost
+        if(eater.type===TYPE.BH){
+          const dsk=disks.get(eater.id); if(dsk){ dsk.power = Math.min(1.0, dsk.power + Math.min(0.75, food.m/8000)); }
+        }
+        // fade food
+        food.fading=true; food.fadeT=0;
       }
-      // actually remove faded ones a bit later in render
     }
   }
 
+  // ========= Spaghettification zone =========
+  function spaghettiDeform(body){
+    // find nearest BH + distance
+    let best=null, bestD=Infinity, dir=[1,0];
+    for(const b of bodies){
+      if(b.type!==TYPE.BH) continue;
+      const dx=b.x-body.x, dy=b.y-body.y;
+      const d=Math.hypot(dx,dy);
+      if(d<bestD){ best=b; bestD=d; dir=[dx/d,dy/d]; }
+    }
+    if(!best) return {a:0, ex:1, ey:1};
+    const zone = params.zoneMult * best.r;
+    if(bestD >= zone) return {a:Math.atan2(dir[1],dir[0]), ex:1, ey:1}; // no stretch outside
+    const t = 1 - (bestD - best.r) / (zone - best.r); // 0 at zone edge → 1 near horizon
+    const k = 1 + t*(params.maxStretch-1); // stretch factor 1..max
+    const squash = 1/Math.sqrt(k);
+    return {a:Math.atan2(dir[1],dir[0]), ex:k, ey:squash};
+  }
+
   // ========= Rendering helpers =========
-  // Name tags
   const labelNodes = new Map();
   function drawLabel(b){
     if(!params.drawLabels) return;
     let n = labelNodes.get(b.id);
     if(!n){ n=document.createElement('div'); n.className='nameTag'; document.body.appendChild(n); labelNodes.set(b.id,n); }
+    const [sx,sy]=toScreen(b.x,b.y);
     n.textContent = `${b.name} (${b.type})`;
-    n.style.left = (b.x + 8) + 'px';
-    n.style.top  = (b.y - b.r - 14) + 'px';
+    n.style.left = (sx + 8) + 'px';
+    n.style.top  = (sy - b.r*cam.z - 14) + 'px';
     n.style.display='block';
   }
-  function hideUnusedLabels(){
+  function cleanupLabels(){
     const alive = new Set(bodies.map(b=>b.id));
     for(const [id,node] of labelNodes){
-      if(!alive.has(id)) { node.remove(); labelNodes.delete(id); }
+      if(!alive.has(id)){ node.remove(); labelNodes.delete(id); }
     }
     if(!params.drawLabels){ for(const node of labelNodes.values()) node.style.display='none'; }
   }
 
-  // Trails
   function pushTrail(i){
-    if(!params.drawTrails) { trails[i].length=0; return; }
-    const t = trails[i];
-    t.push([bodies[i].x, bodies[i].y]);
-    if(t.length>MAX_TRAIL) t.shift();
-    ctx.save(); ctx.globalAlpha=0.6; ctx.lineWidth=1.2; ctx.strokeStyle=bodies[i].color;
+    if(!params.drawTrails){ trails[i].length=0; return; }
+    const t=trails[i], b=bodies[i];
+    t.push([b.x,b.y]); if(t.length>MAX_TRAIL) t.shift();
+    ctx.save(); ctx.globalAlpha=0.6; ctx.lineWidth=1.2; ctx.strokeStyle=b.color;
     ctx.beginPath();
-    for(let k=0;k<t.length;k++){ const p=t[k]; if(k===0) ctx.moveTo(p[0],p[1]); else ctx.lineTo(p[0],p[1]); }
+    for(let k=0;k<t.length;k++){
+      const p=t[k]; const [sx,sy]=toScreen(p[0],p[1]);
+      if(k===0) ctx.moveTo(sx,sy); else ctx.lineTo(sx,sy);
+    }
     ctx.stroke(); ctx.restore();
   }
 
-  // Fake lensing: draw magnified annulus from background around BH
-  function drawBHLensing(bh){
-    const r = bh.r;
-    const inner = r*1.05;
-    const outer = r*2.2;
+  // Accretion disk draw
+  function drawDisk(bh){
+    const dsk = disks.get(bh.id); if(!dsk || dsk.power<=0.001) return;
+    dsk.angle += 0.6 * (1 + 0.5*dsk.power); // rotate
+    dsk.power = Math.max(0, dsk.power - 0.003); // fade
 
-    // Clip to annulus
+    const [sx,sy]=toScreen(bh.x,bh.y);
+    const R1 = bh.r*cam.z*1.25, R2 = bh.r*cam.z*2.1;
     ctx.save();
-    ctx.beginPath();
-    ctx.arc(bh.x,bh.y, outer, 0, TAU);
-    ctx.arc(bh.x,bh.y, inner, 0, TAU, true);
+    ctx.translate(sx,sy);
+    ctx.rotate(dsk.angle*0.02);
+
+    // bright ring with slight gap to mimic Doppler boosted side
+    const grd = ctx.createRadialGradient(0,0,R1, 0,0,R2);
+    grd.addColorStop(0, `rgba(255,240,210,${0.20+0.35*dsk.power})`);
+    grd.addColorStop(0.4, `rgba(255,200,120,${0.25+0.45*dsk.power})`);
+    grd.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.globalCompositeOperation='lighter';
+    ctx.fillStyle=grd;
+    ctx.beginPath(); ctx.arc(0,0,R2,0,TAU); ctx.arc(0,0,R1,0,TAU,true); ctx.fill();
+
+    // boosted side
+    ctx.globalAlpha = 0.35+0.45*dsk.power;
+    ctx.beginPath(); ctx.ellipse(0,0,(R1+R2)/2,(R1+R2)*0.28/2,0, -0.35, 0.35); ctx.strokeStyle='#ffd9a3'; ctx.lineWidth=2; ctx.stroke();
+
+    ctx.restore();
+    ctx.globalCompositeOperation='source-over';
+  }
+
+  // Lensing: sample the composed background (bg+grid) by drawing scaled passes in an annulus
+  function lensingPass(bh){
+    const [sx,sy]=toScreen(bh.x,bh.y);
+    const r = bh.r * cam.z;
+    const inner = r*1.02;
+    const outer = r*(1.9 + 0.25*params.lensing);
+
+    // make a snapshot of current frame (bg + grid) to refract from
+    const snapshot = ctx.getImageData(0,0,W,H);
+    const snapCanvas = document.createElement('canvas');
+    snapCanvas.width=W; snapCanvas.height=H;
+    snapCanvas.getContext('2d').putImageData(snapshot,0,0);
+
+    ctx.save();
+    // annulus clip
+    ctx.beginPath(); ctx.arc(sx,sy, outer, 0, TAU);
+    ctx.arc(sx,sy, inner, 0, TAU, true);
     ctx.clip('evenodd');
 
-    // Sample a slightly larger src rect and draw scaled to annulus
-    // Use background canvas as source (static)
-    const sx = Math.max(0, bh.x - outer*1.2),
-          sy = Math.max(0, bh.y - outer*1.2),
-          sw = Math.min(W - sx, outer*2.4),
-          sh = Math.min(H - sy, outer*2.4);
-
-    // Draw a few concentric scaled passes to hint at refraction gradient
-    for(let i=0;i<3;i++){
-      const scale = 1.06 + i*0.06; // stronger toward outer rim
-      const dx = bh.x - (sw*scale)/2;
-      const dy = bh.y - (sh*scale)/2;
-      ctx.globalAlpha = 0.44 - i*0.12;
-      ctx.drawImage(bg, sx,sy,sw,sh, dx,dy, sw*scale, sh*scale);
+    // multiple passes: outward magnification + slight swirl
+    for(let i=0;i<4;i++){
+      const s = 1 + params.lensing*(0.06 + i*0.06);
+      const angle = (i-1.5)*0.04;
+      const w = W*s, h=H*s;
+      ctx.globalAlpha = 0.45 - i*0.1;
+      ctx.translate(sx,sy); ctx.rotate(angle); ctx.translate(-sx,-sy);
+      ctx.drawImage(snapCanvas, (W-w)/2, (H-h)/2, w,h);
+      ctx.setTransform(DPR,0,0,DPR,0,0); // reset matrix to screen coords
     }
     ctx.restore();
 
-    // Event horizon
-    ctx.fillStyle='#000000';
-    ctx.beginPath(); ctx.arc(bh.x,bh.y, r, 0, TAU); ctx.fill();
-
-    // Thin photon ring highlight
-    ctx.strokeStyle = '#9be1ff';
-    ctx.globalAlpha = 0.6;
-    ctx.lineWidth = 1.2;
-    ctx.beginPath(); ctx.arc(bh.x,bh.y, r*1.03, 0, TAU); ctx.stroke();
-    ctx.globalAlpha = 1;
+    // horizon & photon ring
+    ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(sx,sy, r, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#a8dfff'; ctx.globalAlpha=0.65; ctx.lineWidth=1.3;
+    ctx.beginPath(); ctx.arc(sx,sy, r*1.03, 0, TAU); ctx.stroke();
+    ctx.globalAlpha=1;
   }
 
-  // Spaghettification deformation factor toward a BH
-  function spaghettiFactor(body){
-    // find strongest BH influence
-    let best=0, dirX=0, dirY=0, lens=null;
-    for(const b of bodies){
-      if(b.type!==TYPE.BH || b===body) continue;
-      const dx=b.x-body.x, dy=b.y-body.y;
-      const d=Math.hypot(dx,dy);
-      const s = (b.m / (d*d+1)) || 0;
-      if(s>best){ best=s; dirX=dx/d; dirY=dy/d; lens=b; }
-    }
-    if(!lens) return {s:1, a:0, ex:1, ey:1, dir:[1,0]};
-    // visual tidal factor
-    const t = clamp(params.tidalK * best * 1200, 1, 3.5); // max elongation ~3.5x
-    const squash = 1/Math.sqrt(t);
-    // angle along radial direction
-    const a = Math.atan2(dirY,dirX);
-    return {s:t, a, ex:t, ey:squash, dir:[dirX,dirY]};
-  }
-
-  // Draw bodies with deformation and fading
+  // ========= Draw bodies (with deformation only inside zone) =========
   function drawBodies(dt){
-    const removeIdx = [];
+    const toRemove = [];
     for(let i=0;i<bodies.length;i++){
-      const b = bodies[i];
-
-      // Trails first (behind)
+      const b=bodies[i];
       pushTrail(i);
 
       if(b.type===TYPE.BH){
-        drawBHLensing(b);
+        // disks and labels later (after lensing so disk overlays)
         drawLabel(b);
         continue;
       }
 
-      // Planets / Stars
-      const deform = spaghettiFactor(b);
-      ctx.save();
-      ctx.translate(b.x,b.y);
-      ctx.rotate(deform.a);
-      ctx.scale(deform.ex, deform.ey);
+      // deformation inside zone of nearest BH
+      const def = spaghettiDeform(b);
+      const [sx,sy]=toScreen(b.x,b.y);
 
-      // fading on accretion
-      let alpha = 1;
+      ctx.save();
+      ctx.translate(sx,sy);
+      ctx.rotate(def.a);
+      ctx.scale(def.ex, def.ey);
+
+      // fade on accretion
+      let alpha=1;
       if(b.fading){
         b.fadeT += dt*1.6;
         alpha = clamp(1 - b.fadeT, 0, 1);
-        if(alpha<=0){ removeIdx.push(i); ctx.restore(); continue; }
+        if(alpha<=0){ toRemove.push(i); ctx.restore(); continue; }
       }
-      ctx.globalAlpha = alpha;
+      ctx.globalAlpha=alpha;
 
       if(b.type===TYPE.STAR){
-        const r=b.r;
-        const grd = ctx.createRadialGradient(0,0, r*0.3, 0,0, r*1.9);
-        grd.addColorStop(0, '#fff6d6');
-        grd.addColorStop(0.2, b.color);
-        grd.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(0,0,r*1.9,0,TAU); ctx.fill();
-        ctx.fillStyle='#ffffff'; ctx.beginPath(); ctx.arc(0,0,r*0.8,0,TAU); ctx.fill();
+        const R=b.r*cam.z;
+        const grd = ctx.createRadialGradient(0,0,R*0.35, 0,0,R*1.8);
+        grd.addColorStop(0,'#fff6d6');
+        grd.addColorStop(0.25,b.color);
+        grd.addColorStop(1,'rgba(0,0,0,0)');
+        ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(0,0,R*1.8,0,TAU); ctx.fill();
+        ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(0,0,R*0.8,0,TAU); ctx.fill();
       } else {
-        const r=b.r;
-        ctx.fillStyle=b.color; ctx.beginPath(); ctx.arc(0,0,r,0,TAU); ctx.fill();
+        const R=b.r*cam.z;
+        ctx.fillStyle=b.color; ctx.beginPath(); ctx.arc(0,0,R,0,TAU); ctx.fill();
         ctx.globalAlpha=alpha*0.6; ctx.fillStyle='#ffffff';
-        ctx.beginPath(); ctx.arc(-r*0.3,-r*0.3, r*0.3, 0, TAU); ctx.fill();
+        ctx.beginPath(); ctx.arc(-R*0.3,-R*0.3, R*0.3, 0, TAU); ctx.fill();
       }
       ctx.restore();
       drawLabel(b);
     }
 
-    // Remove fully faded bodies (from accretion)
-    if(removeIdx.length){
-      // remove highest indices first
-      removeIdx.sort((a,b)=>b-a);
-      for(const idx of removeIdx){
-        const dead = bodies[idx];
-        bodies.splice(idx,1);
-        trails.splice(idx,1);
-        const node = labelNodes.get(dead.id);
-        if(node){ node.remove(); labelNodes.delete(dead.id); }
+    // remove fully faded
+    if(toRemove.length){
+      toRemove.sort((a,b)=>b-a);
+      for(const idx of toRemove){
+        const dead=bodies[idx];
+        bodies.splice(idx,1); trails.splice(idx,1);
+        const node=labelNodes.get(dead.id); if(node){ node.remove(); labelNodes.delete(dead.id); }
       }
     }
   }
 
-  // ========= Interaction =========
-  let mouse = {down:false,x:0,y:0,shift:false};
+  // ========= Interaction: body drag + mass scroll =========
+  let draggingBody=null;
   canvas.addEventListener('pointerdown', e=>{
-    mouse.down=true; mouse.x=e.clientX; mouse.y=e.clientY; mouse.shift=e.shiftKey;
-    if(mouse.shift){
-      // lock nearest body
-      let best=null,bd=1e9;
+    if(e.shiftKey){
+      // pick nearest body under cursor
+      const [wx,wy]=toWorld(e.clientX,e.clientY);
+      let best=null, bd=1e9;
       for(const b of bodies){
-        const d=(b.x-mouse.x)**2+(b.y-mouse.y)**2;
-        if(d<bd && Math.sqrt(d)<Math.max(20,b.r+18)){ bd=d; best=b; }
+        const d2=(b.x-wx)**2+(b.y-wy)**2;
+        if(d2<bd && Math.sqrt(d2)<Math.max(20,b.r+18)){ bd=d2; best=b; }
       }
-      if(best){ best.locked=true; best.vx=0; best.vy=0; best.x=mouse.x; best.y=mouse.y; canvas.setPointerCapture(e.pointerId); }
+      if(best){ draggingBody=best; best.locked=true; best.vx=0; best.vy=0; canvas.setPointerCapture(e.pointerId); }
     }
   });
   canvas.addEventListener('pointermove', e=>{
-    mouse.x=e.clientX; mouse.y=e.clientY; mouse.shift=e.shiftKey;
-    if(!mouse.down) return;
-    if(mouse.shift){
-      for(const b of bodies){ if(b.locked){ b.x=mouse.x; b.y=mouse.y; } }
+    if(draggingBody){
+      const [wx,wy]=toWorld(e.clientX,e.clientY);
+      draggingBody.x=wx; draggingBody.y=wy;
     }
   });
-  canvas.addEventListener('pointerup', ()=>{
-    mouse.down=false; for(const b of bodies) b.locked=false;
-  });
+  canvas.addEventListener('pointerup', ()=>{ if(draggingBody){ draggingBody.locked=false; draggingBody=null; } });
+
   canvas.addEventListener('wheel', e=>{
-    let best=null,bd=1e9;
+    // adjust mass for nearest body under cursor
+    const [wx,wy]=toWorld(e.clientX,e.clientY);
+    let best=null, bd=1e9;
     for(const b of bodies){
-      const d=(b.x-e.clientX)**2+(b.y-e.clientY)**2;
-      if(d<bd){bd=d; best=b;}
+      const d2=(b.x-wx)**2+(b.y-wy)**2; if(d2<bd){ bd=d2; best=b; }
     }
     if(best){
       best.m = clamp(best.m * (e.deltaY<0 ? 1.08 : 0.925), 10, 1e7);
       best.r = radiusFromMass(best.m, best.type);
     }
-    e.preventDefault();
   }, {passive:false});
 
   // ========= UI =========
   function $(id){return document.getElementById(id)}
-  $('g').value=params.G; $('ts').value=params.dtScale; $('tid').value=params.tidalK;
-  $('trails').checked=params.drawTrails; $('labels').checked=params.drawLabels;
-  $('maxb').value=params.maxBodies;
-
   const syncVals=()=>{
     $('gVal').textContent=params.G.toFixed(3);
     $('tsVal').textContent=params.dtScale.toFixed(2);
-    $('tidVal').textContent=params.tidalK.toFixed(2);
+    $('zoneVal').textContent=params.zoneMult.toFixed(1);
+    $('stretchVal').textContent=params.maxStretch.toFixed(2);
+    $('lensVal').textContent=params.lensing.toFixed(2);
     $('mbVal').textContent=params.maxBodies;
-  }; syncVals();
+  };
+  $('g').value=params.G; $('ts').value=params.dtScale; $('zone').value=params.zoneMult; $('stretch').value=params.maxStretch; $('lens').value=params.lensing; $('trails').checked=params.drawTrails; $('labels').checked=params.drawLabels; $('maxb').value=params.maxBodies; syncVals();
 
   $('g').oninput=e=>{ params.G=parseFloat(e.target.value); syncVals(); };
   $('ts').oninput=e=>{ params.dtScale=parseFloat(e.target.value); syncVals(); };
-  $('tid').oninput=e=>{ params.tidalK=parseFloat(e.target.value); syncVals(); };
+  $('zone').oninput=e=>{ params.zoneMult=parseFloat(e.target.value); syncVals(); };
+  $('stretch').oninput=e=>{ params.maxStretch=parseFloat(e.target.value); syncVals(); };
+  $('lens').oninput=e=>{ params.lensing=parseFloat(e.target.value); syncVals(); };
   $('trails').onchange=e=>{ params.drawTrails=e.target.checked; };
   $('labels').onchange=e=>{ params.drawLabels=e.target.checked; if(!params.drawLabels){ for(const node of labelNodes.values()) node.style.display='none'; } };
   $('maxb').oninput=e=>{ params.maxBodies=parseInt(e.target.value,10); syncVals(); };
-  $('clear').onclick=()=>{ bodies.length=0; trails.length=0; for(const n of labelNodes.values()) n.remove(); labelNodes.clear(); };
-  $('reset').onclick=()=>{ resize(); };
+  $('clear').onclick=()=>{ bodies.length=0; trails.length=0; for(const n of labelNodes.values()) n.remove(); labelNodes.clear(); disks.clear(); };
+  $('reset').onclick=()=>{ cam.x=0; cam.y=0; cam.z=1; };
 
-  $('addBH').onclick=()=> {
-    if(bodies.length>=params.maxBodies) return;
-    makeBody(TYPE.BH,{x:rand(W*0.35,W*0.65),y:rand(H*0.35,H*0.65),m:rand(3e4,9e4),vx:0,vy:0});
-  };
-  $('addStar').onclick=()=> {
-    if(bodies.length>=params.maxBodies) return;
-    makeBody(TYPE.STAR,{m:rand(5e3,1.2e4)});
-  };
-  $('addPlanet').onclick=()=> {
-    if(bodies.length>=params.maxBodies) return;
-    makeBody(TYPE.PLANET,{m:rand(80,1200)});
-  };
+  $('addBH').onclick=()=>{ if(bodies.length>=params.maxBodies) return; makeBody(TYPE.BH,{x:cam.x+rand(-200,200)/cam.z, y:cam.y+rand(-200,200)/cam.z, m:rand(3e4,9e4), vx:0,vy:0}); };
+  $('addStar').onclick=()=>{ if(bodies.length>=params.maxBodies) return; makeBody(TYPE.STAR,{x:cam.x+rand(-300,300)/cam.z, y:cam.y+rand(-300,300)/cam.z, m:rand(5e3,1.2e4)}); };
+  $('addPlanet').onclick=()=>{ if(bodies.length>=params.maxBodies) return; makeBody(TYPE.PLANET,{x:cam.x+rand(-300,300)/cam.z, y:cam.y+rand(-300,300)/cam.z, m:rand(80,1200)}); };
   $('addSolar').onclick=()=> {
-    const cx = rand(W*0.35,W*0.65), cy = rand(H*0.35,H*0.65);
+    const cx = cam.x, cy = cam.y;
     const star = makeBody(TYPE.STAR,{x:cx,y:cy,m:rand(9e3,1.5e4),vx:0,vy:0,name:NAME.systems[(Math.random()*NAME.systems.length)|0]+' ☀'});
     const Np=7;
     for(let i=0;i<Np;i++){
-      const a=rand(0,TAU), R=60+i*40+rand(-10,10);
-      const vmag = Math.sqrt(params.G*star.m/Math.max(R,10));
-      const x = cx + Math.cos(a)*R, y = cy + Math.sin(a)*R;
-      const vx = -Math.sin(a)*vmag, vy = Math.cos(a)*vmag;
+      const a=rand(0,TAU), R=120+i*70+rand(-10,10);
+      const vmag=Math.sqrt(params.G*star.m/Math.max(R,10));
+      const x=cx+Math.cos(a)*R, y=cy+Math.sin(a)*R;
+      const vx=-Math.sin(a)*vmag, vy=Math.cos(a)*vmag;
       makeBody(TYPE.PLANET,{x,y,m:rand(90,1200),vx,vy,color:pickColor(TYPE.PLANET), name:randomName(TYPE.PLANET)});
     }
   };
@@ -474,16 +599,27 @@
 
     gravityStep(dt);
 
-    // Draw
-    ctx.drawImage(bg,0,0);     // calm background
+    // 1) Background + grid (world space)
+    ctx.clearRect(0,0,W,H);
+    drawBackground();
+    drawGrid();
+
+    // 2) Lensing pass for each BH over background/grid
+    for(const b of bodies){ if(b.type===TYPE.BH) lensingPass(b); }
+
+    // 3) Bodies (planets/stars) + labels
     drawBodies(dt);
-    hideUnusedLabels();
+
+    // 4) Accretion disks drawn on top of horizon
+    for(const b of bodies){ if(b.type===TYPE.BH) drawDisk(b); }
+
+    cleanupLabels();
 
     // FPS
     fpsAcc+=dt; fpsCount++;
     if(fpsAcc>=0.5){
-      const fps = (fpsCount/fpsAcc)|0;
-      $('fps').textContent = `FPS: ${fps} • Bodies: ${bodies.length}`;
+      const fps=(fpsCount/fpsAcc)|0;
+      document.getElementById('fps').textContent=`FPS: ${fps} • Bodies: ${bodies.length} • Zoom: ${cam.z.toFixed(2)}x`;
       fpsAcc=0; fpsCount=0;
     }
 
@@ -491,7 +627,7 @@
   }
 
   // ========= Bootstrap =========
-  resize();               // IMPORTANT: scene starts EMPTY
+  resize();                 // scene starts empty
   requestAnimationFrame(step);
 })();
 </script>
